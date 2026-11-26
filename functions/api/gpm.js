@@ -2,12 +2,14 @@ import { json, requireTelegram } from "../_lib/auth.js";
 const MAX_CREDIT_SECONDS=300;
 const RATES=[0,200,350,550,850,1200,1600,2100,2700,3400,4200];
 const COSTS=[0,25000,100000,350000,1000000,2500000,5000000,10000000,20000000,40000000];
-const MACHINES=[{id:'starter',name:'GPU Starter',cost:500000,rate:300},{id:'miner',name:'GPU Miner',cost:1500000,rate:700},{id:'pro',name:'GPU Pro',cost:5000000,rate:1500},{id:'elite',name:'GPU Elite',cost:15000000,rate:3000}];
+const MACHINES=[{id:'starter',name:'GPU Starter',cost:500000,rate:50,description:'Minadora de entrada · estable'},{id:'miner',name:'GPU Miner',cost:2500000,rate:180,description:'Rendimiento intermedio'},{id:'pro',name:'GPU Pro',cost:10000000,rate:650,description:'Alta capacidad de producción'},{id:'elite',name:'GPU Elite',cost:35000000,rate:1800,description:'Máxima potencia del catálogo'}];
 function rate(level){return RATES[Math.min(Math.max(1,Number(level)||1),RATES.length-1)]||200;}
 async function accrue(env,id,now){
  await env.DB.prepare("INSERT INTO gpm_state (telegram_id,balance_milli,last_tick_at,updated_at) VALUES (?,0,?,datetime('now')) ON CONFLICT(telegram_id) DO NOTHING").bind(id,now).run();
  const st=await env.DB.prepare("SELECT balance_milli,last_tick_at,machine_level FROM gpm_state WHERE telegram_id=?").bind(id).first();
- const elapsed=Math.max(0,Math.min(now-Number(st.last_tick_at||now),MAX_CREDIT_SECONDS)),award=Math.floor(elapsed*rate(st.machine_level)/60);
+ const owned=await env.DB.prepare("SELECT machine_id,COUNT(*) quantity FROM gpm_machines WHERE telegram_id=? GROUP BY machine_id").bind(id).all();
+ const production=(owned.results||[]).reduce((sum,row)=>sum+(MACHINES.find(m=>m.id===row.machine_id)?.rate||0)*Number(row.quantity||0),0) || rate(st.machine_level);
+ const elapsed=Math.max(0,Math.min(now-Number(st.last_tick_at||now),MAX_CREDIT_SECONDS)),award=Math.floor(elapsed*production/60);
  if(award>0)await env.DB.batch([env.DB.prepare("UPDATE gpm_state SET balance_milli=balance_milli+?,last_tick_at=?,updated_at=datetime('now') WHERE telegram_id=?").bind(award,now,id),env.DB.prepare("INSERT INTO gpm_ledger (telegram_id,amount_milli,reason,created_at) VALUES (?,?,'farm_activity',datetime('now'))").bind(id,award)]);
  else await env.DB.prepare("UPDATE gpm_state SET last_tick_at=?,updated_at=datetime('now') WHERE telegram_id=?").bind(now,id).run();
 }
@@ -40,5 +42,5 @@ export async function onRequestPost({request,env}){
  }
  const st=await state(env,user.id),machines=await env.DB.prepare("SELECT machine_id,COUNT(*) quantity FROM gpm_machines WHERE telegram_id=? GROUP BY machine_id").bind(user.id).all();
  const history=await env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN amount_milli>0 THEN amount_milli ELSE 0 END),0) total_milli FROM gpm_ledger WHERE telegram_id=?").bind(user.id).first();
- return json({gpm:Number(st.balance_milli||0)/1000,gpmMilli:Number(st.balance_milli||0),earnedMilli:Number(history?.total_milli||0),level:Number(st.machine_level||1),ratePerMinute:rate(st.machine_level)/1000,nextCost:COSTS[st.machine_level]?COSTS[st.machine_level]/1000:null,maxLevel:!COSTS[st.machine_level],welcomeClaimed:!!st.welcome_claimed,machines:machines.results||[],catalog:MACHINES.map(x=>({...x,costGpm:x.cost/1000,rateGpmMinute:x.rate/1000})),virtual:true});
+ const machineRate=(machines.results||[]).reduce((sum,row)=>sum+(MACHINES.find(m=>m.id===row.machine_id)?.rate||0)*Number(row.quantity||0),0);const activeRate=machineRate||rate(st.machine_level);return json({gpm:Number(st.balance_milli||0)/1000,gpmMilli:Number(st.balance_milli||0),earnedMilli:Number(history?.total_milli||0),level:Number(st.machine_level||1),ratePerMinute:activeRate/1000,ratePerHour:activeRate*60/1000,nextCost:COSTS[st.machine_level]?COSTS[st.machine_level]/1000:null,maxLevel:!COSTS[st.machine_level],welcomeClaimed:!!st.welcome_claimed,machines:machines.results||[],catalog:MACHINES.map(x=>({...x,costGpm:x.cost/1000,rateGpmMinute:x.rate/1000,rateGpmHour:x.rate*60/1000})),virtual:true});
 }

@@ -27,5 +27,15 @@ export async function onRequestGet({ request, env }) {
     env.DB.prepare("INSERT OR IGNORE INTO owner_ad_events (ymid, telegram_id, estimated_usd_micros, created_at) SELECT ?, ?, ?, datetime('now') WHERE ?=1").bind(ymid, session.telegram_id, micros, eligible && ownerOnlyEligible ? 1 : 0)
   ]);
 
+  // One-time 100 GPM referral reward, triggered by the referred user's first
+  // valued impression in the income-generation placement only.
+  if (eligible && shareEligible) {
+    await env.DB.batch([
+      env.DB.prepare("UPDATE referrals SET inviter_reward_claimed=1 WHERE referred_telegram_id=? AND inviter_reward_claimed=0 AND EXISTS (SELECT 1 FROM monetized_events WHERE ymid=? AND user_share_usd_micros>0)").bind(session.telegram_id, ymid),
+      env.DB.prepare("INSERT INTO gpm_state (telegram_id,balance_milli,last_tick_at,updated_at,welcome_claimed) SELECT referrer_telegram_id,100000,unixepoch(),datetime('now'),1 FROM referrals WHERE referred_telegram_id=? AND inviter_reward_claimed=1 AND changes()>0 ON CONFLICT(telegram_id) DO UPDATE SET balance_milli=balance_milli+100000,updated_at=datetime('now')").bind(session.telegram_id),
+      env.DB.prepare("INSERT INTO gpm_ledger (telegram_id,amount_milli,reason,created_at) SELECT referrer_telegram_id,100000,'referral_reward',datetime('now') FROM referrals WHERE referred_telegram_id=? AND inviter_reward_claimed=1 AND changes()>0").bind(session.telegram_id)
+    ]);
+  }
+
   return new Response("OK", { status: 200, headers: { "cache-control": "no-store" } });
 }

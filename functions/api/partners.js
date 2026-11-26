@@ -43,7 +43,9 @@ async function getStats(env, user, inviteCode) {
     inviteLink: "https://t.me/GPU_MINERBOT?startapp=ref_" + inviteCode,
     referrals: Number(stats?.total || 0),
     attribution: "Las invitaciones se cuentan cuando la persona abre la Mini App por primera vez desde tu enlace.",
-    rewardsEnabled: false,
+    rewardsEnabled: true,
+    inviterRewardGPM: 100,
+    rewardCondition: "Se acredita una vez, cuando el referido completa su primera misión de generación de ingresos con anuncio válido.",
     referralWelcomeBonusGPM: 500
   };
 }

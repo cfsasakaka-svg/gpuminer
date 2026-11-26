@@ -181,6 +181,12 @@ async function adPlaceholder() {
   }
 }
 async function initialize() {
+  if (!tg?.initData) {
+    const nameEl = document.getElementById('tgName');
+    if (nameEl) nameEl.textContent = 'Abre desde Telegram';
+    setNotice('Para activar tu cuenta, anuncios y saldo, abre el bot @GPU_MINERBOT y pulsa «Abrir GPU Miner».');
+    return;
+  }
   try { await loadMonetag(); setNotice('Monetag conectado. Las recompensas requieren confirmación del servidor.'); }
   catch (error) { setNotice(error.message); }
   try { await refreshAccount(); }
@@ -191,10 +197,33 @@ async function initialize() {
   }
   await refreshGPM();
   await refreshStore();
+  await refreshOwnerTokenomics();
   setInterval(refreshGPM, 60000);
 }
 window.show = show;
 window.adPlaceholder = adPlaceholder;
 window.buyGPMUpgrade = buyGPMUpgrade;window.claimWelcome=claimWelcome;window.buyMachine=buyMachine;window.upgradeMachine=upgradeMachine;window.doubleGPMAd=doubleGPMAd;
 window.storeOrder = storeOrder;
+window.addEventListener('error', event => { console.error('GPU Miner runtime error:', event.error || event.message); setNotice('Se produjo un error interno. Cierra y vuelve a abrir GPU Miner desde Telegram.'); });
+window.addEventListener('unhandledrejection', event => { console.error('GPU Miner async error:', event.reason); setNotice('Falló una operación. Comprueba tu conexión e inténtalo de nuevo.'); });
 initialize();
+
+async function refreshOwnerTokenomics() {
+  const card = document.getElementById('ownerTokenomicsCard');
+  if (!card || !tg?.initData) return;
+  try {
+    const response = await fetch('/api/admin/tokenomics', { headers: authHeaders(), cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 403 || response.status === 401) { card.style.display = 'none'; return; }
+    if (!response.ok) throw new Error('No se pudo consultar la tokenómica.');
+    card.style.display = 'block';
+    document.getElementById('ownerReserveInitial').textContent = Number(data.initialReserveGPM || 0).toLocaleString('es-VE') + ' GPM';
+    document.getElementById('ownerAllocation').textContent = Number(data.plannedOwnerAllocationPercent || 0) + '%';
+    document.getElementById('ownerUsers').textContent = Number(data.users || 0).toLocaleString('es-VE');
+    document.getElementById('ownerContract').textContent = data.contractDeployed ? 'Desplegado' : 'No desplegado';
+    document.getElementById('ownerTokenomicsNotice').textContent = data.notice + ' ' + data.issuancePolicy;
+  } catch (error) {
+    card.style.display = 'none';
+    console.warn(error);
+  }
+}

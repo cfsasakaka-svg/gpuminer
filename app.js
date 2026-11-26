@@ -213,10 +213,21 @@ async function adPlaceholder() {
     const session = await sessionResponse.json().catch(() => ({}));
     if (!sessionResponse.ok || !session.ymid) throw new Error(session.error === 'unauthorized' ? 'La sesión de Telegram no fue validada.' : 'No se pudo crear la sesión de anuncio.');
     setNotice('Anuncio iniciado. Esperando la confirmación de Monetag…');
-    // Monetag Rewarded Popup integration: invoke the SDK zone with the 'pop' format.
-    // The SDK promise is only the client flow; server postback remains authoritative for credit.
-    await window.monetagShow();
-    setNotice('Popup finalizado. Verificando el abono mediante el postback del servidor…');
+    // Rewarded interstitial: guard against SDK promises that never settle.
+    // This timeout only releases the UI; server postback remains authoritative for credit.
+    setNotice('Anuncio iniciado. Esperando la respuesta de Monetag…');
+    let adTimer;
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => window.monetagShow()),
+        new Promise((_, reject) => {
+          adTimer = setTimeout(() => reject(new Error('Monetag no respondió en 30 segundos. Intenta nuevamente más tarde.')), 30000);
+        })
+      ]);
+    } finally {
+      if (adTimer) clearTimeout(adTimer);
+    }
+    setNotice('Intersticial finalizado. Verificando el abono mediante el postback del servidor…');
     const before = Number(account?.balance || 0);
     const rewardsBefore = Number(account?.rewards || 0);
     let confirmed = false;

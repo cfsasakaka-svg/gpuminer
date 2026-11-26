@@ -58,9 +58,28 @@ async function refreshGPM() {
     const el=document.getElementById('gpmBalance'); if(el) el.textContent=balance+' GPM';
     const profile=document.getElementById('profGPM'); if(profile) profile.textContent=balance;
     const status=document.getElementById('gpmStatus');
-    if(status) status.textContent='Registro sincronizado. '+Number(data.ratePerMinute||0).toFixed(3)+' GPM por minuto de actividad, con límite de acreditación por intervalo.';
+    if(status) status.textContent='Registro sincronizado. La acumulación virtual se calcula por nivel, con intervalos de actividad limitados.';
+    const level=Number(data.level||1); const machine=document.getElementById('gpmMachine');if(machine)machine.textContent='GPU virtual · Nivel '+level;
+    const prod=document.getElementById('gpmProduction');if(prod)prod.textContent='Producción: '+Number(data.ratePerMinute||0).toFixed(3)+' GPM/min';
+    const cost=document.getElementById('gpmUpgradeCost');if(cost)cost.textContent=data.nextCost===null?'Nivel máximo alcanzado':'Próxima mejora: '+Number(data.nextCost).toFixed(3)+' GPM';
+    const buy=document.getElementById('gpmBuy');if(buy){buy.disabled=data.nextCost===null;buy.textContent=data.nextCost===null?'Nivel máximo':'Mejorar';}
+    const shop=document.getElementById('gpmShopStatus');if(shop)shop.textContent=data.nextCost===null?'Máximo nivel disponible alcanzado.':'Mejora disponible: usa GPM acumulados para aumentar la producción virtual.';
   } catch(error) { const status=document.getElementById('gpmStatus'); if(status) status.textContent=error.message; }
   finally { gpmBusy=false; }
+}
+
+
+async function buyGPMUpgrade(){
+  const button=document.getElementById('gpmBuy'), status=document.getElementById('gpmShopStatus');
+  if(button)button.disabled=true;
+  try{
+    const response=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'buy'})});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data.error==='insufficient_gpm'?'No tienes suficientes GPM para esta mejora.':data.error==='max_level'?'Ya alcanzaste el nivel máximo.':'No se pudo completar la compra.');
+    if(status)status.textContent='Mejora comprada y registrada en el servidor.';
+    await refreshGPM();
+  }catch(e){if(status)status.textContent=e.message;await refreshGPM();}
+  finally{if(button)button.disabled=false;}
 }
 
 async function loadMonetag() {
@@ -143,4 +162,5 @@ async function initialize() {
 }
 window.show = show;
 window.adPlaceholder = adPlaceholder;
+window.buyGPMUpgrade = buyGPMUpgrade;
 initialize();

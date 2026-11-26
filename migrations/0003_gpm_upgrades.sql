@@ -1,0 +1,1 @@
+ALTER TABLE gpm_state ADD COLUMN machine_level INTEGER NOT NULL DEFAULT 1;

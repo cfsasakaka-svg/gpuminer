@@ -14,9 +14,11 @@ export async function onRequestGet({ request, env }) {
   const session = await env.DB.prepare("SELECT telegram_id FROM ad_sessions WHERE ymid=? AND expires_at >= datetime('now')").bind(ymid).first();
   if (!session) return new Response("Unknown or expired ad session", { status: 404 });
   const micros = Math.round(price * 1000000), userShare = Math.floor(micros * 0.30), ownerShare = micros - userShare;
+  // Reward accounting is tied to valued impressions only; clicks are recorded but never credited.
+  const eligible = eventType === 'impression' && rewardType === 'valued' && micros > 0;
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO ad_postbacks (ymid, event_type, reward_event_type, estimated_price, zone_id, sub_zone_id, received_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))").bind(ymid, eventType, rewardType, priceText, p.get("zone_id"), p.get("sub_zone_id")),
-    env.DB.prepare("INSERT OR IGNORE INTO monetized_events (ymid, telegram_id, estimated_usd_micros, user_share_usd_micros, owner_share_usd_micros, created_at) SELECT ?, ?, ?, ?, ?, datetime('now') WHERE ?='valued' AND ? > 0").bind(ymid, session.telegram_id, micros, userShare, ownerShare, rewardType, micros),
+    env.DB.prepare("INSERT OR IGNORE INTO monetized_events (ymid, telegram_id, estimated_usd_micros, user_share_usd_micros, owner_share_usd_micros, created_at) SELECT ?, ?, ?, ?, ?, datetime('now') WHERE ?='valued' AND ? > 0").bind(ymid, session.telegram_id, micros, userShare, ownerShare, eligible ? 'valued' : 'not_valued', eligible ? micros : 0),
     env.DB.prepare("INSERT OR IGNORE INTO reward_ledger (telegram_id, ymid, amount_usd_micros, created_at) SELECT telegram_id, ymid, user_share_usd_micros, datetime('now') FROM monetized_events WHERE ymid=? AND user_share_usd_micros > 0").bind(ymid)
   ]);
   return new Response("OK", { status: 200, headers: { "cache-control": "no-store" } });

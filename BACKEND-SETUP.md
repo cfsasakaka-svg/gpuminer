@@ -27,7 +27,7 @@ The postback accepts only server-confirmed `valued` impressions. A unique ymid p
 2. Generate the TMA SDK tag for Rewarded Interstitial.
 3. Save its exact script URL and main SDK zone ID as GitHub Actions secrets `MONETAG_SDK_SCRIPT_URL` and `MONETAG_SDK_ZONE_ID`.
 4. In that SDK zone's Postback URL field, configure:
-   `https://gpuminer.pages.dev/postback?secret=YOUR_MONETAG_POSTBACK_SECRET&ymid={ymid}&zone_id={zone_id}&sub_zone_id={sub_zone_id}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}`
+   `https://gpuminer.pages.dev/postback?secret=YOUR_MONETAG_POSTBACK_SECRET&ymid={ymid}&zone_id={zone_id}&sub_zone_id={sub_zone_id}&request_var={request_var}&event_type={event_type}&reward_event_type={reward_event_type}&estimated_price={estimated_price}`
 5. The postback secret is stored as the GitHub Actions secret `MONETAG_POSTBACK_SECRET` and is deployed server-side. Do not put it in HTML or Telegram messages.
 6. Set `ADMIN_TELEGRAM_ID` to the owner's numeric Telegram user ID to enable the private admin summary.
 

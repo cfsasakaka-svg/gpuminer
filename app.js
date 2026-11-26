@@ -2,6 +2,7 @@ const tg = window.Telegram?.WebApp;
 try { tg?.ready(); tg?.expand(); } catch {}
 
 let sdkReady = false;
+let monetagSdkName = null;
 let account = null;
 let busy = false;
 let preparedDailyAd = null;
@@ -182,7 +183,8 @@ async function loadMonetag() {
   const scriptUrl = new URL(config.sdkScriptUrl, location.href);
   if (scriptUrl.protocol !== 'https:') throw new Error('La URL del SDK no es HTTPS.');
   const sdkName = 'show_' + String(config.sdkZoneId);
-  if (typeof window[sdkName] === 'function') { sdkReady = true; return; }
+  monetagSdkName = sdkName;
+  if (typeof window[sdkName] === 'function') { sdkReady = true; window.monetagShow = window[sdkName]; return; }
   await new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = scriptUrl.href;
@@ -231,53 +233,90 @@ async function prepareDailyAd() {
 }
 
 async function adPlaceholder() {
-  if(busy) return;
-  const button=document.getElementById('rewardAdButton');
-  if(!tg?.initData){setNotice('Abre GPU Miner desde Telegram para identificar tu cuenta.');return;}
-  if(!sdkReady || typeof window.monetagShow!=='function'){
-    setNotice('Conectando con Monetag. Espera y vuelve a pulsar.');
-    if(button){button.disabled=true;button.textContent='Conectando…';}
-    try{await loadMonetag();await prepareDailyAd();}catch(e){setNotice(e.message);if(button){button.disabled=false;button.textContent='Reintentar anuncio';}}
+  if (busy) return;
+  const button = document.getElementById('rewardAdButton');
+  if (!tg?.initData) { setNotice('Abre GPU Miner desde Telegram para identificar tu cuenta.'); return; }
+  if (!sdkReady || !monetagSdkName || typeof window[monetagSdkName] !== 'function') {
+    setNotice('Conectando con Monetag. Espera a que termine y vuelve a pulsar.');
+    if (button) { button.disabled = true; button.textContent = 'Conectando…'; }
+    try { await loadMonetag(); await prepareDailyAd(); }
+    catch (error) { setNotice(error?.message || 'No se pudo conectar con Monetag.'); if (button) { button.disabled = false; button.textContent = 'Reintentar anuncio'; } }
     return;
   }
-  const prepared=preparedDailyAd;
-  if(!prepared){
+  const prepared = preparedDailyAd;
+  if (!prepared) {
     setNotice('La sesión del anuncio todavía se está preparando. Espera a que aparezca «Ver anuncio».');
-    if(button){button.disabled=true;button.textContent='Preparando…';}
+    if (button) { button.disabled = true; button.textContent = 'Preparando…'; }
     void prepareDailyAd();
     return;
   }
-  busy=true; preparedDailyAd=null;
-  if(button){button.disabled=true;button.textContent='Abriendo…';}
-  // Critical: invoke Monetag synchronously in the tap handler, before any await/fetch.
+
+  busy = true;
+  preparedDailyAd = null;
+  if (button) { button.disabled = true; button.textContent = 'Abriendo POP…'; }
+  // Invoke the SDK's original global directly and synchronously in this tap handler.
+  // Do not await a network request or wrap the call in another Promise first.
   let showPromise;
-  try{showPromise=Promise.resolve(window.monetagShow({...prepared.params,type:'pop'}));}
-  catch(error){showPromise=Promise.reject(error);}
-  try{
-    setNotice('Solicitud enviada a Monetag. Esperando el anuncio…');
-    const outcome=await Promise.race([
-      showPromise.then(result=>({kind:'resolved',result})).catch(error=>({kind:'rejected',error})),
-      new Promise(resolve=>setTimeout(()=>resolve({kind:'pending'}),15000))
+  try {
+    showPromise = window[monetagSdkName]({ ...prepared.params, type: 'pop' });
+  } catch (error) {
+    showPromise = Promise.reject(error);
+  }
+
+  try {
+    setNotice('Monetag recibió el toque. Abriendo el anuncio POP…');
+    const outcome = await Promise.race([
+      Promise.resolve(showPromise).then(result => ({ kind: 'resolved', result }))
+        .catch(error => ({ kind: 'rejected', error })),
+      new Promise(resolve => setTimeout(() => resolve({ kind: 'timeout' }), 12000))
     ]);
-    if(button)button.textContent='Verificando…';
-    if(outcome.kind==='pending')setNotice('Monetag todavía no respondió. Comprobando el registro del servidor…');
-    else if(outcome.kind==='rejected'){console.warn('Monetag rechazó el anuncio:',outcome.error);setNotice('Monetag no confirmó la apertura. Comprobando el postback…');}
-    else setNotice(outcome.result?.reward_event_type==='valued'?'Monetag confirmó una impresión monetizada. Verificando el abono…':'Respuesta recibida. Verificando el registro del servidor…');
-    let confirmed=false;
-    for(let i=0;i<15;i++){
-      if(button)button.textContent=`Verificando ${i+1}/15…`;
-      await new Promise(resolve=>setTimeout(resolve,3000));
-      let fresh=null,verifyTimer;
-      try{fresh=await Promise.race([refreshAccount(),new Promise((_,reject)=>{verifyTimer=setTimeout(()=>reject(new Error('Tiempo agotado al consultar el saldo.')),5000);})]);}
-      catch{fresh=null;}finally{if(verifyTimer)clearTimeout(verifyTimer);}
-      if(fresh&&(Number(fresh.balance||0)>prepared.before||Number(fresh.rewards||0)>prepared.rewardsBefore)){confirmed=true;break;}
+
+    if (outcome.kind === 'rejected') {
+      const reason = String(outcome.error?.message || outcome.error || 'Error desconocido').slice(0, 180);
+      console.error('Monetag POP no pudo abrirse o confirmarse:', outcome.error);
+      setNotice('Monetag rechazó el POP: ' + reason + '. No se acreditó ninguna recompensa. Puedes volver a intentarlo.');
+      showToast('Monetag: ' + reason, 'error');
+      return;
     }
-    if(confirmed){setNotice('Recompensa confirmada por el servidor.');notifyUser('¡Recompensa acreditada!','El servidor confirmó el abono.','success');}
-    else if(outcome.kind==='resolved'&&outcome.result?.reward_event_type==='non_valued'){setNotice('Esta impresión no fue monetizada. No se generó recompensa.');showToast('Esta impresión no generó ingresos.','pending');}
-    else if(outcome.kind==='resolved'&&outcome.result?.reward_event_type==='valued'){setNotice('Monetag confirmó la impresión monetizada, pero el postback aún no aparece en el saldo.');showToast('Impresión monetizada; abono pendiente.','pending');}
-    else{setNotice('No llegó confirmación verificable del anuncio. No se acreditó saldo localmente.');showToast('No llegó confirmación del servidor.','pending');}
-  }catch(error){setNotice(error?.message||'No se pudo completar el anuncio.');showToast(error?.message||'No se pudo completar el anuncio.','error');}
-  finally{busy=false;if(button){button.disabled=true;button.textContent='Preparando…';}void prepareDailyAd();}
+    if (outcome.kind === 'timeout') {
+      setNotice('Monetag no respondió en 12 segundos. No se confirmó la apertura ni se acreditó recompensa. Inténtalo otra vez.');
+      showToast('Monetag no respondió al POP.', 'error');
+      return;
+    }
+
+    const result = outcome.result;
+    if (result?.reward_event_type !== 'valued' || result?.event_type !== 'impression') {
+      setNotice(result?.reward_event_type === 'non_valued'
+        ? 'Monetag abrió/procesó el POP, pero esta impresión no fue monetizada. No se generó recompensa.'
+        : 'Monetag no devolvió una confirmación monetizada válida. No se acreditó recompensa.');
+      showToast('No hubo una impresión monetizada confirmada.', 'pending');
+      return;
+    }
+
+    setNotice('Monetag confirmó una impresión monetizada. Verificando el abono del servidor…');
+    let confirmed = false;
+    for (let i = 0; i < 8; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      try {
+        const fresh = await refreshAccount();
+        if (Number(fresh.balance || 0) > prepared.before || Number(fresh.rewards || 0) > prepared.rewardsBefore) {
+          confirmed = true;
+          break;
+        }
+      } catch (error) { console.warn('Esperando postback de Monetag:', error); }
+    }
+    if (confirmed) {
+      setNotice('Recompensa confirmada por el servidor.');
+      notifyUser('¡Recompensa acreditada!', 'El servidor confirmó el abono.', 'success');
+    } else {
+      setNotice('Monetag confirmó la impresión monetizada, pero el postback aún no aparece en el saldo. No se añadió saldo localmente.');
+      showToast('Impresión monetizada; abono pendiente.', 'pending');
+    }
+  } finally {
+    busy = false;
+    if (button) { button.disabled = false; button.textContent = 'Ver anuncio'; }
+    void prepareDailyAd();
+  }
 }
 
 async function refreshPartners() {

@@ -56,4 +56,10 @@ fi
 if [ -n "${MONETAG_SDK_ZONE_ID:-}" ]; then
   printf '%s' "$MONETAG_SDK_ZONE_ID" | wrangler pages secret put MONETAG_SDK_ZONE_ID --project-name gpuminer
 fi
+if [ -n "${CRYPTAPI_WALLET_ADDRESS:-}" ]; then
+  printf '%s' "$CRYPTAPI_WALLET_ADDRESS" | wrangler pages secret put CRYPTAPI_WALLET_ADDRESS --project-name gpuminer
+fi
+if [ -n "${CRYPTAPI_CALLBACK_BASE:-}" ]; then
+  printf '%s' "$CRYPTAPI_CALLBACK_BASE" | wrangler pages secret put CRYPTAPI_CALLBACK_BASE --project-name gpuminer
+fi
 wrangler pages deploy . --project-name=gpuminer --branch=main

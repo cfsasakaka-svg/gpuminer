@@ -142,17 +142,36 @@ async function refreshStore(){
    if(!data.orders?.length)list.innerHTML='<div class="empty">Todavía no tienes pedidos.</div>';
    else list.innerHTML=data.orders.map(o=>{const sku=String(o.sku||'').replace(/</g,'&lt;');const st=String(o.status||'pending').replace(/</g,'&lt;');return '<div class="listrow"><strong>'+sku+'</strong><span style="float:right">'+(Number(o.amount_usd_cents)/100).toFixed(2)+' USD · '+(Number(o.gpm_milli)/1000).toFixed(3)+' GPM</span><div class="small muted">'+st+' · '+String(o.created_at||'')+'</div></div>';}).join('');
   }
+  for(const order of (data.orders||[])){if(order.status==='paid'&&!lastPaidOrders.has(order.id)){lastPaidOrders.add(order.id);notifyUser('¡Compra exitosa!','Tu pago fue confirmado y '+(Number(order.gpm_milli)/1000).toLocaleString('es-VE')+' GPM se acreditaron en tu cuenta.','success');if(status)status.textContent='Pago confirmado. GPM acreditados correctamente.';}}
+  if((data.orders||[]).some(o=>o.status==='paid')&&storePollTimer){clearInterval(storePollTimer);storePollTimer=null;}
+  else if((data.orders||[]).some(o=>o.status==='pending')&&!storePollTimer)storePollTimer=setInterval(refreshStore,12000);
  }catch(e){if(status)status.textContent=e.message;}
 }
+let storePollTimer = null;
+let lastPaidOrders = new Set();
 async function storeOrder(sku){
- const status=document.getElementById('storeStatus');
+ const status=document.getElementById('storeStatus'),checkout=document.getElementById('paymentCheckout');
  try{
-  const response=await fetch('/api/store',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({sku})});
+  const response=await fetch('/api/cryptapi-checkout',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({sku})});
   const data=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error('No se pudo registrar el pedido.');
-  if(status)status.textContent='Pedido '+data.orderId+' registrado como pendiente. No se acreditó GPM; falta habilitar y confirmar el pago.';showToast('Pedido creado. El pago está pendiente; todavía no se ha completado la compra.','pending');
+  if(!response.ok)throw new Error(data.message||'No se pudo preparar el pago.');
+  if(!data.address||!data.amountCoin)throw new Error('La pasarela no devolvió datos de pago válidos.');
+  lastPaidOrders.add(data.orderId);
+  if(checkout){checkout.style.display='block';checkout.innerHTML='';
+   const title=document.createElement('strong');title.textContent='Pago USDT · BNB Smart Chain (BEP20)';checkout.appendChild(title);
+   const amount=document.createElement('div');amount.className='price';amount.style.margin='10px 0';amount.textContent=String(data.amountCoin)+' USDT';checkout.appendChild(amount);
+   const label=document.createElement('div');label.className='small muted';label.textContent='Envía exactamente esta cantidad a la dirección temporal:';checkout.appendChild(label);
+   const address=document.createElement('div');address.className='payment-address';address.textContent=data.address;address.id='paymentAddress';checkout.appendChild(address);
+   const copy=document.createElement('button');copy.className='btn secondary full';copy.textContent='Copiar dirección';copy.onclick=async()=>{try{await navigator.clipboard.writeText(data.address);notifyUser('Dirección copiada','La dirección de pago se copió correctamente.','success');}catch{notifyUser('Copia manual','Mantén pulsada la dirección para copiarla.','info');}};checkout.appendChild(copy);
+   const info=document.createElement('div');info.className='notice';info.style.marginTop='10px';info.textContent='Pedido '+data.orderId+' · Vence en '+data.expiresAt+'. Envía únicamente USDT por BEP20. No uses otras redes. El saldo GPM se acreditará automáticamente después de la confirmación de la red.';checkout.appendChild(info);
+   const qr=document.createElement('img');qr.alt='Código QR de pago USDT';qr.width=190;qr.height=190;qr.style.cssText='display:block;margin:14px auto;background:#fff;padding:8px;border-radius:12px';qr.src='https://api.qrserver.com/v1/create-qr-code/?size=190x190&data='+encodeURIComponent(data.address);checkout.appendChild(qr);
+  }
+  if(status)status.textContent='Dirección de pago creada. Esperando confirmación de USDT en la red.';
+  notifyUser('Pedido creado','Envía '+data.amountCoin+' USDT por BEP20. Tu GPM se acreditará cuando el pago sea confirmado.','info');
   await refreshStore();
- }catch(e){if(status)status.textContent=e.message;showToast(e.message,'error');}
+  if(storePollTimer)clearInterval(storePollTimer);
+  storePollTimer=setInterval(refreshStore,12000);
+ }catch(e){if(status)status.textContent=e.message;notifyUser('No se pudo iniciar el pago',e.message,'error');}
 }
 
 async function loadMonetag() {

@@ -12,7 +12,7 @@ const catalog=[
 export async function onRequestGet({request,env}){
  const user=await requireTelegram(request,env);if(!user)return json({error:"unauthorized"},401);
  const orders=await env.DB.prepare("SELECT id,sku,amount_usd_cents,gpm_milli,status,created_at,paid_at FROM gpm_orders WHERE telegram_id=? ORDER BY created_at DESC LIMIT 30").bind(user.id).all();
- return json({catalog:catalog.map(x=>({...x,priceUSD:x.usd/100,gpmAmount:x.gpm/1000})),orders:orders.results||[],paymentsEnabled:false});
+ return json({catalog:catalog.map(x=>({...x,priceUSD:x.usd/100,gpmAmount:x.gpm/1000})),orders:orders.results||[],paymentsEnabled:!!(env.CRYPTAPI_WALLET_ADDRESS&&env.CRYPTAPI_CALLBACK_BASE)});
 }
 export async function onRequestPost({request,env}){
  if(!env.DB)return json({error:"service_unavailable"},503);
@@ -22,5 +22,5 @@ export async function onRequestPost({request,env}){
  const id=crypto.randomUUID();
  await env.DB.prepare("INSERT INTO users (telegram_id,username,first_name,created_at,updated_at) VALUES (?, ?, ?, datetime('now'),datetime('now')) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,updated_at=datetime('now')").bind(user.id,user.username,user.firstName).run();
  await env.DB.prepare("INSERT INTO gpm_orders (id,telegram_id,sku,amount_usd_cents,gpm_milli,status,created_at) VALUES (?,?,?,?,?,'pending',datetime('now'))").bind(id,user.id,item.sku,item.usd,item.gpm).run();
- return json({orderId:id,sku:item.sku,status:"pending",paymentsEnabled:false,message:"Pedido registrado como pendiente. No se acredita GPM sin pago confirmado."},202);
+ return json({orderId:id,sku:item.sku,status:"pending",paymentsEnabled:!!(env.CRYPTAPI_WALLET_ADDRESS&&env.CRYPTAPI_CALLBACK_BASE),message:"Pedido registrado como pendiente. No se acredita GPM sin pago confirmado."},202);
 }

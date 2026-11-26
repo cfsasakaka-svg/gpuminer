@@ -35,6 +35,8 @@ jobs:
           ADMIN_TELEGRAM_ID: ${{ secrets.ADMIN_TELEGRAM_ID }}
           MONETAG_SDK_SCRIPT_URL: ${{ secrets.MONETAG_SDK_SCRIPT_URL }}
           MONETAG_SDK_ZONE_ID: ${{ secrets.MONETAG_SDK_ZONE_ID }}
+          CRYPTAPI_WALLET_ADDRESS: ${{ secrets.CRYPTAPI_WALLET_ADDRESS }}
+          CRYPTAPI_CALLBACK_BASE: ${{ secrets.CRYPTAPI_CALLBACK_BASE }}
         run: bash scripts/deploy-pages.sh
 
       - name: Restore Telegram Mini App launch button

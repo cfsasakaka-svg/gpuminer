@@ -204,6 +204,12 @@ async function adPlaceholder() {
     if (typeof window.monetagShow !== 'function') throw new Error('El SDK de Monetag todavía no está disponible.');
     busy = true;
     if (button) { button.disabled = true; button.textContent = 'Cargando…'; }
+    // Capture the verified balance BEFORE opening the ad. The postback may arrive
+    // while the ad is on screen, so taking this snapshot afterwards misses the reward.
+    setNotice('Comprobando tu saldo antes del anuncio…');
+    const baseline = await refreshAccount();
+    const before = Number(baseline?.balance || 0);
+    const rewardsBefore = Number(baseline?.rewards || 0);
     setNotice('Solicitando una sesión de anuncio segura…');
     // Limit session creation time too; otherwise a stalled network request leaves the button busy forever.
     const sessionController = new AbortController();
@@ -229,44 +235,64 @@ async function adPlaceholder() {
     }
     const session = await sessionResponse.json().catch(() => ({}));
     if (!sessionResponse.ok || !session.ymid) throw new Error(session.error === 'unauthorized' ? 'La sesión de Telegram no fue validada.' : 'No se pudo crear la sesión de anuncio.');
-    setNotice('Anuncio iniciado. Esperando la confirmación de Monetag…');
-    // Rewarded interstitial: pass the server-created ymid and placement so Monetag can
-    // correlate its confirmation/postback with this user session. Keep a UI timeout as a fallback.
+    // SDK callback and server postback are independent. Keep the SDK outcome for
+    // diagnostics, but the server ledger remains the only source of credited rewards.
     setNotice('Anuncio iniciado. Esperando la respuesta de Monetag…');
-    let adTimer;
-    try {
-      await Promise.race([
-        Promise.resolve().then(() => window.monetagShow({ type: 'end', ymid: session.ymid, requestVar: 'daily_mission' })),
-        new Promise((_, reject) => {
-          adTimer = setTimeout(() => reject(new Error('Monetag no respondió en 30 segundos. Intenta nuevamente más tarde.')), 30000);
-        })
-      ]);
-    } finally {
-      if (adTimer) clearTimeout(adTimer);
+    const sdkOutcome = await Promise.race([
+      Promise.resolve()
+        .then(() => window.monetagShow({ type: 'end', ymid: session.ymid, requestVar: 'daily_mission' }))
+        .then(result => ({ kind: 'resolved', result }))
+        .catch(error => ({ kind: 'rejected', error })),
+      new Promise(resolve => setTimeout(() => resolve({ kind: 'pending' }), 15000))
+    ]);
+    if (sdkOutcome.kind === 'pending') {
+      setNotice('El anuncio se abrió. La respuesta de Monetag está tardando; verificando el abono directamente con el servidor…');
+    } else if (sdkOutcome.kind === 'rejected') {
+      setNotice('El SDK no confirmó la respuesta. Comprobando si llegó el postback seguro…');
+    } else if (sdkOutcome.result?.reward_event_type === 'non_valued') {
+      setNotice('Monetag informó que esta impresión no fue monetizada. Verificando el registro del servidor…');
+    } else {
+      setNotice('Respuesta de Monetag recibida. Verificando el abono mediante el postback del servidor…');
     }
-    setNotice('Intersticial finalizado. Verificando el abono mediante el postback del servidor…');
-    const before = Number(account?.balance || 0);
-    const rewardsBefore = Number(account?.rewards || 0);
+
     let confirmed = false;
-    for (let i = 0; i < 8; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+    // Check the authoritative account ledger for up to 45 seconds, even if the
+    // SDK callback times out or rejects. Monetag sends callback and postback separately.
+    for (let i = 0; i < 15; i++) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
       let fresh;
+      let verifyTimer;
       try {
         fresh = await Promise.race([
           refreshAccount(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Consulta de saldo agotó el tiempo límite.')), 5000))
+          new Promise((_, reject) => {
+            verifyTimer = setTimeout(() => reject(new Error('Consulta de saldo agotó el tiempo límite.')), 5000);
+          })
         ]);
       } catch (verificationError) {
-        // Keep the UI responsive if account verification is slow; server postback remains authoritative.
-        if (i === 7) setNotice('El anuncio terminó, pero no pudimos verificar el abono a tiempo. Consulta tu saldo más tarde.');
-        continue;
+        fresh = null;
+      } finally {
+        if (verifyTimer) clearTimeout(verifyTimer);
       }
-      if (Number(fresh.balance || 0) > before || Number(fresh.rewards || 0) > rewardsBefore) { confirmed = true; break; }
+      if (fresh && (Number(fresh.balance || 0) > before || Number(fresh.rewards || 0) > rewardsBefore)) {
+        confirmed = true;
+        break;
+      }
     }
-    setNotice(confirmed
-      ? 'Recompensa registrada en tu cuenta mediante el servidor.'
-      : 'Monetag confirmó el anuncio, pero el postback todavía no refleja un abono. No se acreditó saldo localmente.');
-    if(confirmed)notifyUser('¡Recompensa acreditada!','El servidor confirmó el abono de tu recompensa.','success');else showToast('Anuncio visto; la recompensa aún no está acreditada.','pending');
+
+    if (confirmed) {
+      setNotice('Recompensa registrada en tu cuenta mediante el postback verificado del servidor.');
+      notifyUser('¡Recompensa acreditada!', 'El servidor confirmó el abono de tu recompensa.', 'success');
+    } else if (sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'non_valued') {
+      setNotice('Monetag confirmó que esta impresión no fue monetizada. Por eso no se generó recompensa.');
+      showToast('Esta impresión no generó ingresos.', 'pending');
+    } else if (sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'valued') {
+      setNotice('Monetag confirmó una impresión monetizada, pero el postback aún no aparece en tu saldo. No se acreditó nada localmente; el servidor sigue siendo la autoridad.');
+      showToast('Impresión monetizada; abono pendiente de sincronización.', 'pending');
+    } else {
+      setNotice('No llegó una confirmación verificable al servidor durante esta comprobación. No se acreditó saldo localmente. Puedes consultar tu saldo más tarde.');
+      showToast('No llegó confirmación del servidor.', 'pending');
+    }
   } catch (error) {
     setNotice(error?.message || 'No se pudo completar el anuncio.');
     showToast(error?.message || 'No se pudo completar el anuncio.','error');

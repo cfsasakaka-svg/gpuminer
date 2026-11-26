@@ -205,11 +205,28 @@ async function adPlaceholder() {
     busy = true;
     if (button) { button.disabled = true; button.textContent = 'Cargando…'; }
     setNotice('Solicitando una sesión de anuncio segura…');
-    const sessionResponse = await fetch('/api/ad-session', {
-      method: 'POST',
-      headers: { ...authHeaders(), 'content-type': 'application/json' },
-      body: JSON.stringify({ requestVar: 'daily_mission' })
-    });
+    // Limit session creation time too; otherwise a stalled network request leaves the button busy forever.
+    const sessionController = new AbortController();
+    let sessionTimer;
+    let sessionResponse;
+    try {
+      sessionResponse = await Promise.race([
+        fetch('/api/ad-session', {
+          method: 'POST',
+          headers: { ...authHeaders(), 'content-type': 'application/json' },
+          body: JSON.stringify({ requestVar: 'daily_mission' }),
+          signal: sessionController.signal
+        }),
+        new Promise((_, reject) => {
+          sessionTimer = setTimeout(() => {
+            sessionController.abort();
+            reject(new Error('El servidor tardó más de 15 segundos en crear la sesión del anuncio. Comprueba tu conexión e inténtalo nuevamente.'));
+          }, 15000);
+        })
+      ]);
+    } finally {
+      if (sessionTimer) clearTimeout(sessionTimer);
+    }
     const session = await sessionResponse.json().catch(() => ({}));
     if (!sessionResponse.ok || !session.ymid) throw new Error(session.error === 'unauthorized' ? 'La sesión de Telegram no fue validada.' : 'No se pudo crear la sesión de anuncio.');
     setNotice('Anuncio iniciado. Esperando la confirmación de Monetag…');

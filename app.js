@@ -249,111 +249,107 @@ async function prepareDailyAd() {
 async function adPlaceholder() {
   if (busy) return;
   const button = document.getElementById('rewardAdButton');
-  if (!tg?.initData) {
-    setNotice('Abre GPU Miner desde el botón de Telegram para identificar tu cuenta.');
-    return;
-  }
-  if (!sdkReady || typeof window.monetagShow !== 'function') {
-    setNotice('El sistema de anuncios todavía se está conectando. Inténtalo en unos segundos.');
-    return;
-  }
-  const prepared = preparedDailyAd;
-  if (!prepared) {
-    if (button) { button.disabled = true; button.textContent = 'Preparando…'; }
-    setNotice('El anuncio aún se está preparando. En cuanto esté listo podrás abrirlo con un toque.');
-    await prepareDailyAd();
-    return;
-  }
-
-  busy = true;
-  preparedDailyAd = null;
-  if (button) { button.disabled = true; button.textContent = 'Abriendo…'; }
-  // IMPORTANT: call Monetag synchronously inside the actual tap handler.
-  // No fetch, balance refresh, or other await may run before this call.
-  let showPromise;
   try {
-    showPromise = Promise.resolve(window.monetagShow({ ...prepared.params, type: 'end' }));
-  } catch (error) {
-    showPromise = Promise.reject(error);
-  }
-
-  try {
-    setNotice('Anuncio solicitado. Esperando la confirmación de Monetag…');
+    if (!tg?.initData) throw new Error('Abre GPU Miner desde el botón de Telegram para identificar tu cuenta.');
+    if (!sdkReady) await loadMonetag();
+    if (typeof window.monetagShow !== 'function') throw new Error('El SDK de Monetag todavía no está disponible.');
+    busy = true;
+    if (button) { button.disabled = true; button.textContent = 'Cargando…'; }
+    // Capture the verified balance BEFORE opening the ad. The postback may arrive
+    // while the ad is on screen, so taking this snapshot afterwards misses the reward.
+    setNotice('Comprobando tu saldo antes del anuncio…');
+    const baseline = await refreshAccount();
+    const before = Number(baseline?.balance || 0);
+    const rewardsBefore = Number(baseline?.rewards || 0);
+    setNotice('Solicitando una sesión de anuncio segura…');
+    // Limit session creation time too; otherwise a stalled network request leaves the button busy forever.
+    const sessionController = new AbortController();
+    let sessionTimer;
+    let sessionResponse;
+    try {
+      sessionResponse = await Promise.race([
+        fetch('/api/ad-session', {
+          method: 'POST',
+          headers: { ...authHeaders(), 'content-type': 'application/json' },
+          body: JSON.stringify({ requestVar: 'daily_mission' }),
+          signal: sessionController.signal
+        }),
+        new Promise((_, reject) => {
+          sessionTimer = setTimeout(() => {
+            sessionController.abort();
+            reject(new Error('El servidor tardó más de 15 segundos en crear la sesión del anuncio. Comprueba tu conexión e inténtalo nuevamente.'));
+          }, 15000);
+        })
+      ]);
+    } finally {
+      if (sessionTimer) clearTimeout(sessionTimer);
+    }
+    const session = await sessionResponse.json().catch(() => ({}));
+    if (!sessionResponse.ok || !session.ymid) throw new Error(session.error === 'unauthorized' ? 'La sesión de Telegram no fue validada.' : 'No se pudo crear la sesión de anuncio.');
+    // SDK callback and server postback are independent. Keep the SDK outcome for
+    // diagnostics, but the server ledger remains the only source of credited rewards.
+    setNotice('Anuncio iniciado. Esperando la respuesta de Monetag…');
     const sdkOutcome = await Promise.race([
-      showPromise.then(result => ({ kind: 'resolved', result })).catch(error => ({ kind: 'rejected', error })),
-      new Promise(resolve => setTimeout(() => resolve({ kind: 'pending' }), 30000))
+      Promise.resolve()
+        .then(() => window.monetagShow({ type: 'end', ymid: session.ymid, requestVar: 'daily_mission' }))
+        .then(result => ({ kind: 'resolved', result }))
+        .catch(error => ({ kind: 'rejected', error })),
+      new Promise(resolve => setTimeout(() => resolve({ kind: 'pending' }), 15000))
     ]);
-    const sdkResult = sdkOutcome.kind === 'resolved' ? sdkOutcome.result : null;
-    const sdkSessionMatches = Boolean(
-      sdkResult && sdkResult.event_type === 'impression' &&
-      String(sdkResult.variable2 || '') === String(prepared.params.ymid)
-    );
     if (sdkOutcome.kind === 'pending') {
-      if (button) button.textContent = 'Verificando…';
-      setNotice('Monetag está tardando. La app está consultando el servidor para comprobar si llegó el abono…');
+      setNotice('El anuncio se abrió. La respuesta de Monetag está tardando; verificando el abono directamente con el servidor…');
     } else if (sdkOutcome.kind === 'rejected') {
-      if (button) button.textContent = 'Verificando…';
-      console.warn('Monetag show rejected:', sdkOutcome.error);
-      setNotice('Monetag no confirmó la apertura. Comprobando el registro seguro en el servidor…');
-    } else if (!sdkSessionMatches) {
-      if (button) button.textContent = 'Verificando…';
-      console.warn('Monetag callback does not match this impression:', {
-        event_type: sdkResult?.event_type || null,
-        hasMatchingSession: String(sdkResult?.variable2 || '') === String(prepared.params.ymid),
-        reward_event_type: sdkResult?.reward_event_type || null
-      });
-      setNotice('Respuesta recibida, pero falta validar que pertenece a este anuncio. Comprobando el servidor…');
-    } else if (sdkResult?.reward_event_type === 'non_valued') {
-      if (button) button.textContent = 'Verificando…';
+      setNotice('El SDK no confirmó la respuesta. Comprobando si llegó el postback seguro…');
+    } else if (sdkOutcome.result?.reward_event_type === 'non_valued') {
       setNotice('Monetag informó que esta impresión no fue monetizada. Verificando el registro del servidor…');
     } else {
-      if (button) button.textContent = 'Verificando abono…';
-      setNotice('Monetag respondió para este anuncio. Verificando el abono mediante el servidor…');
+      setNotice('Respuesta de Monetag recibida. Verificando el abono mediante el postback del servidor…');
     }
 
     let confirmed = false;
+    // Check the authoritative account ledger for up to 45 seconds, even if the
+    // SDK callback times out or rejects. Monetag sends callback and postback separately.
     for (let i = 0; i < 15; i++) {
-      if (button) button.textContent = `Verificando ${i + 1}/15…`;
-      if (i > 0) setNotice(`Comprobando el abono en el servidor (${i + 1}/15)…`);
       await new Promise(resolve => setTimeout(resolve, 3000));
       let fresh;
       let verifyTimer;
       try {
         fresh = await Promise.race([
           refreshAccount(),
-          new Promise((_, reject) => { verifyTimer = setTimeout(() => reject(new Error('Consulta de saldo agotó el tiempo límite.')), 5000); })
+          new Promise((_, reject) => {
+            verifyTimer = setTimeout(() => reject(new Error('Consulta de saldo agotó el tiempo límite.')), 5000);
+          })
         ]);
-      } catch { fresh = null; }
-      finally { if (verifyTimer) clearTimeout(verifyTimer); }
-      if (fresh && (Number(fresh.balance || 0) > prepared.before || Number(fresh.rewards || 0) > prepared.rewardsBefore)) {
+      } catch (verificationError) {
+        fresh = null;
+      } finally {
+        if (verifyTimer) clearTimeout(verifyTimer);
+      }
+      if (fresh && (Number(fresh.balance || 0) > before || Number(fresh.rewards || 0) > rewardsBefore)) {
         confirmed = true;
         break;
       }
     }
 
-    if (confirmed && sdkSessionMatches && sdkResult?.reward_event_type === 'valued') {
-      setNotice('Recompensa registrada: Monetag confirmó esta impresión monetizada y el servidor verificó el abono.');
-      notifyUser('¡Recompensa acreditada!', 'Monetag y el servidor confirmaron tu recompensa.', 'success');
-    } else if (confirmed) {
-      setNotice('El servidor registró un movimiento, pero Monetag no confirmó una impresión recompensada válida en esta sesión. Revisa el saldo actualizado.');
-    } else if (sdkSessionMatches && sdkResult?.reward_event_type === 'non_valued') {
+    if (confirmed) {
+      setNotice('Recompensa registrada en tu cuenta mediante el postback verificado del servidor.');
+      notifyUser('¡Recompensa acreditada!', 'El servidor confirmó el abono de tu recompensa.', 'success');
+    } else if (sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'non_valued') {
       setNotice('Monetag confirmó que esta impresión no fue monetizada. Por eso no se generó recompensa.');
       showToast('Esta impresión no generó ingresos.', 'pending');
-    } else if (sdkSessionMatches && sdkResult?.reward_event_type === 'valued') {
-      setNotice('Monetag confirmó una impresión monetizada, pero el postback aún no aparece en tu saldo. No se acreditó nada localmente.');
+    } else if (sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'valued') {
+      setNotice('Monetag confirmó una impresión monetizada, pero el postback aún no aparece en tu saldo. No se acreditó nada localmente; el servidor sigue siendo la autoridad.');
       showToast('Impresión monetizada; abono pendiente de sincronización.', 'pending');
     } else {
-      setNotice('No se pudo validar una recompensa para este anuncio. El servidor no confirmó un abono nuevo; no se acreditó saldo localmente.');
-      showToast('No se pudo verificar la recompensa.', 'pending');
+      setNotice('No llegó una confirmación verificable al servidor durante esta comprobación. No se acreditó saldo localmente. Puedes consultar tu saldo más tarde.');
+      showToast('No llegó confirmación del servidor.', 'pending');
     }
   } catch (error) {
-    console.error('Error en anuncio recompensado:', error);
     setNotice(error?.message || 'No se pudo completar el anuncio.');
-    showToast(error?.message || 'No se pudo completar el anuncio.', 'error');
+    showToast(error?.message || 'No se pudo completar el anuncio.','error');
   } finally {
     busy = false;
-    if (button) { button.disabled = true; button.textContent = 'Preparando siguiente…'; }
-    await prepareDailyAd();
+    if (button) { button.disabled = false; button.textContent = 'Ver anuncio'; }
   }
 }
 
@@ -441,7 +437,6 @@ async function initialize() {
     if (nameEl) nameEl.textContent = 'Abre desde Telegram';
     setNotice(error.message);
   }
-  await prepareDailyAd();
   await refreshGPM();
   await refreshStore();
   await refreshOwnerTokenomics();

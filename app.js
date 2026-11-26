@@ -6,12 +6,37 @@ let account = null;
 let busy = false;
 let gpmBusy = false;
 
+let toastTimer = null;
+function showToast(message, type = 'success') {
+  let box = document.getElementById('gpmToast');
+  if (!box) { box = document.createElement('div'); box.id = 'gpmToast'; box.setAttribute('role','status'); box.setAttribute('aria-live','polite'); document.body.appendChild(box); }
+  box.className = 'gpm-toast ' + type;
+  box.innerHTML = '<span class="toast-mark">' + (type === 'error' ? '!' : type === 'pending' ? '…' : '✓') + '</span><span></span>';
+  box.lastElementChild.textContent = message;
+  requestAnimationFrame(() => box.classList.add('visible'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove('visible'), 3400);
+}
+function animateButton(button) {
+  if (!button) return;
+  button.classList.remove('tap-pop');
+  void button.offsetWidth;
+  button.classList.add('tap-pop');
+  setTimeout(() => button.classList.remove('tap-pop'), 420);
+}
+document.addEventListener('click', event => {
+  const button = event.target.closest('button');
+  if (button && !button.disabled) animateButton(button);
+});
+
 function show(id, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === id));
   document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   else document.querySelector(`[data-view="${id}"]`)?.classList.add('active');
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  const section = document.getElementById(id)?.querySelector('.section-title')?.textContent || ({farm:'Granja',deposit:'Tienda GPM',withdraw:'Retirar',partners:'Socios',profile:'Perfil'}[id] || 'Sección');
+  showToast(section + ' abierta.');
 }
 function rankName(n) {
   return ["", "Rookie", "Miner", "Tech", "Advanced", "Expert", "Master", "Elite", "Legend"][Math.min(n, 8)] || "Legend";
@@ -76,19 +101,19 @@ async function buyGPMUpgrade(){
     const response=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'buy_upgrade'})});
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error==='insufficient_gpm'?'No tienes suficientes GPM para esta mejora.':data.error==='max_level'?'Ya alcanzaste el nivel máximo.':'No se pudo completar la compra.');
-    if(status)status.textContent='Mejora comprada y registrada en el servidor.';
+    if(status)status.textContent='Mejora comprada y registrada en el servidor.';showToast('¡Mejora comprada con éxito!','success');
     await refreshGPM();
-  }catch(e){if(status)status.textContent=e.message;await refreshGPM();}
+  }catch(e){if(status)status.textContent=e.message;showToast(e.message,'error');await refreshGPM();}
   finally{if(button)button.disabled=false;}
 }
 
 
 
-async function claimWelcome(){try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'welcome'})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='welcome_already_claimed'?'El bono ya fue reclamado.':'No se pudo reclamar el bono.');const el=document.getElementById('welcomeStatus');if(el)el.textContent='Bono de bienvenida registrado en tu cuenta.';await refreshGPM();}catch(e){const el=document.getElementById('welcomeStatus');if(el)el.textContent=e.message;}}
+async function claimWelcome(){try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'welcome'})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='welcome_already_claimed'?'El bono ya fue reclamado.':'No se pudo reclamar el bono.');const el=document.getElementById('welcomeStatus');if(el)el.textContent='Bono de bienvenida registrado en tu cuenta.';showToast('¡Bono reclamado con éxito!','success');await refreshGPM();}catch(e){const el=document.getElementById('welcomeStatus');if(el)el.textContent=e.message;showToast(e.message,'error');}}
 function renderMachines(data){const el=document.getElementById('machineCatalog');if(!el||!data.catalog)return;const owned={};(data.machines||[]).forEach(x=>owned[x.machine_id]={qty:Number(x.quantity),level:Number(x.upgrade_level||0)});el.innerHTML=data.catalog.map((m,i)=>{const o=owned[m.id]||{qty:0,level:0};const locked=!m.unlocked;const cost=m.upgradeCosts[o.level]??null;return `<div class="gpu ${locked?'locked':''}"><div class="gpu-visual">${['▣','◈','⬡','◆'][i]}</div><h3>${m.name}${locked?' · Bloqueada':''}</h3><div class="meta">${m.description||'Minadora virtual'}</div><div class="meta">Base: ${Number(m.rateGpmMinute).toFixed(3)} GPM/min · ${(Number(m.rateGpmHour)).toFixed(2)} GPM/h</div><div class="meta">En propiedad: ${o.qty} · Mejoras: ${o.level}/${m.upgradeMax}</div><div class="price">Precio: ${Number(m.costGpm).toLocaleString('es-VE',{maximumFractionDigits:3})} GPM</div>${locked?'<div class="notice">Completa 5 mejoras en la máquina anterior para desbloquear.</div>':`<button class="btn secondary full" onclick="buyMachine('${m.id}')">Comprar minadora</button>`}${o.qty?`<div class="notice" style="margin:8px 0">Nivel de mejora ${o.level}/${m.upgradeMax}${cost!==null?' · siguiente: '+Number(cost).toLocaleString('es-VE')+' GPM':''}</div><button class="btn full" ${o.level>=m.upgradeMax?'disabled':''} onclick="upgradeMachine('${m.id}')">${o.level>=m.upgradeMax?'Mejoras completas':'Mejorar minadora'}</button>`:''}</div>`}).join('');}
-async function buyMachine(machine){const st=document.getElementById('gpmShopStatus');try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'buy_machine',machine})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='insufficient_gpm'?'Saldo GPM insuficiente.':'No se pudo comprar la máquina.');if(st)st.textContent='Máquina comprada y registrada.';await refreshGPM();}catch(e){if(st)st.textContent=e.message;}}
-async function upgradeMachine(machine){const st=document.getElementById('gpmShopStatus');try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'upgrade_machine',machine})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='insufficient_gpm'?'GPM insuficiente para la mejora.':d.error==='upgrade_max'?'Esta minadora ya alcanzó su nivel máximo.':'No se pudo aplicar la mejora.');if(st)st.textContent='Mejora aplicada: producción aumentada.';await refreshGPM();}catch(e){if(st)st.textContent=e.message;}}
-async function doubleGPMAd(){const b=document.getElementById('doubleGPMButton'),st=document.getElementById('doubleGPMStatus');if(busy)return;try{if(!tg?.initData)throw new Error('Abre la Mini App desde Telegram.');if(!sdkReady)await loadMonetag();busy=true;if(b){b.disabled=true;b.textContent='Preparando anuncio…'}const current=await fetch('/api/gpm',{method:'POST',headers:authHeaders()});const cur=await current.json();if(!current.ok||Number(cur.gpmMilli)<=0)throw new Error('Necesitas GPM acumulado para duplicarlo.');const base=Number(cur.gpmMilli);const ss=await fetch('/api/ad-session',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({requestVar:'double_gpm'})});const session=await ss.json();if(!ss.ok)throw new Error(session.error==='empty_gpm'?'Todavía no tienes GPM que duplicar.':'No se pudo iniciar el anuncio.');const expected=base+Number(session.gpmSnapshotMilli||base);if(st)st.textContent='Anuncio recompensado en curso. El servidor confirmará el duplicado.';const result=await window.monetagShow({type:'end',ymid:session.ymid,requestVar:'double_gpm'});if(!result||result.reward_event_type!=='valued'){if(st)st.textContent='Anuncio no validado como recompensado. No se duplicó GPM.';return;}for(let i=0;i<12;i++){await new Promise(resolve=>setTimeout(resolve,1500));const r=await fetch('/api/gpm',{method:'POST',headers:authHeaders()});const fresh=await r.json();if(Number(fresh.gpmMilli)>=expected){if(st)st.textContent='Duplicación verificada por servidor: se añadió '+(Number(session.gpmSnapshotMilli||base)/1000).toLocaleString('es-VE')+' GPM.';await refreshGPM();return;}}if(st)st.textContent='Evento confirmado por Monetag; el abono aún se está procesando en el servidor.';}catch(e){if(st)st.textContent=e.message;}finally{busy=false;if(b){b.disabled=false;b.textContent='Duplicar GPM · Ver anuncio';}}}
+async function buyMachine(machine){const st=document.getElementById('gpmShopStatus');try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'buy_machine',machine})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='insufficient_gpm'?'Saldo GPM insuficiente.':'No se pudo comprar la máquina.');if(st)st.textContent='Máquina comprada y registrada.';showToast('¡Compra exitosa! Tu minadora ya está en tu cuenta.','success');await refreshGPM();}catch(e){if(st)st.textContent=e.message;showToast(e.message,'error');}}
+async function upgradeMachine(machine){const st=document.getElementById('gpmShopStatus');try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'upgrade_machine',machine})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='insufficient_gpm'?'GPM insuficiente para la mejora.':d.error==='upgrade_max'?'Esta minadora ya alcanzó su nivel máximo.':'No se pudo aplicar la mejora.');if(st)st.textContent='Mejora aplicada: producción aumentada.';showToast('¡Mejora aplicada con éxito!','success');await refreshGPM();}catch(e){if(st)st.textContent=e.message;showToast(e.message,'error');}}
+async function doubleGPMAd(){const b=document.getElementById('doubleGPMButton'),st=document.getElementById('doubleGPMStatus');if(busy)return;try{if(!tg?.initData)throw new Error('Abre la Mini App desde Telegram.');if(!sdkReady)await loadMonetag();busy=true;if(b){b.disabled=true;b.textContent='Preparando anuncio…'}const current=await fetch('/api/gpm',{method:'POST',headers:authHeaders()});const cur=await current.json();if(!current.ok||Number(cur.gpmMilli)<=0)throw new Error('Necesitas GPM acumulado para duplicarlo.');const base=Number(cur.gpmMilli);const ss=await fetch('/api/ad-session',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({requestVar:'double_gpm'})});const session=await ss.json();if(!ss.ok)throw new Error(session.error==='empty_gpm'?'Todavía no tienes GPM que duplicar.':'No se pudo iniciar el anuncio.');const expected=base+Number(session.gpmSnapshotMilli||base);if(st)st.textContent='Anuncio recompensado en curso. El servidor confirmará el duplicado.';const result=await window.monetagShow({type:'end',ymid:session.ymid,requestVar:'double_gpm'});if(!result||result.reward_event_type!=='valued'){if(st)st.textContent='Anuncio no validado como recompensado. No se duplicó GPM.';return;}for(let i=0;i<12;i++){await new Promise(resolve=>setTimeout(resolve,1500));const r=await fetch('/api/gpm',{method:'POST',headers:authHeaders()});const fresh=await r.json();if(Number(fresh.gpmMilli)>=expected){if(st)st.textContent='Duplicación verificada por servidor: se añadió '+(Number(session.gpmSnapshotMilli||base)/1000).toLocaleString('es-VE')+' GPM.';showToast('¡Recompensa duplicada y acreditada con éxito!','success');await refreshGPM();return;}}if(st)st.textContent='Evento confirmado por Monetag; el abono aún se está procesando en el servidor.';showToast('Anuncio validado. El abono está pendiente de confirmación del servidor.','pending');}catch(e){if(st)st.textContent=e.message;showToast(e.message,'error');}finally{busy=false;if(b){b.disabled=false;b.textContent='Duplicar GPM · Ver anuncio';}}}
 
 
 async function refreshStore(){
@@ -109,9 +134,9 @@ async function storeOrder(sku){
   const response=await fetch('/api/store',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({sku})});
   const data=await response.json().catch(()=>({}));
   if(!response.ok)throw new Error('No se pudo registrar el pedido.');
-  if(status)status.textContent='Pedido '+data.orderId+' registrado como pendiente. No se acreditó GPM; falta habilitar y confirmar el pago.';
+  if(status)status.textContent='Pedido '+data.orderId+' registrado como pendiente. No se acreditó GPM; falta habilitar y confirmar el pago.';showToast('Pedido creado. El pago está pendiente; todavía no se ha completado la compra.','pending');
   await refreshStore();
- }catch(e){if(status)status.textContent=e.message;}
+ }catch(e){if(status)status.textContent=e.message;showToast(e.message,'error');}
 }
 
 async function loadMonetag() {
@@ -173,8 +198,10 @@ async function adPlaceholder() {
     setNotice(confirmed
       ? 'Recompensa registrada en tu cuenta mediante el servidor.'
       : 'Monetag confirmó el anuncio, pero el postback todavía no refleja un abono. No se acreditó saldo localmente.');
+    showToast(confirmed ? '¡Recompensa acreditada con éxito!' : 'Anuncio visto; la recompensa aún no está acreditada.', confirmed ? 'success' : 'pending');
   } catch (error) {
     setNotice(error?.message || 'No se pudo completar el anuncio.');
+    showToast(error?.message || 'No se pudo completar el anuncio.','error');
   } finally {
     busy = false;
     if (button) { button.disabled = false; button.textContent = 'Ver anuncio'; }

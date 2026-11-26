@@ -59,7 +59,7 @@ async function refreshGPM() {
     const profile=document.getElementById('profGPM'); if(profile) profile.textContent=balance;
     const status=document.getElementById('gpmStatus');
     if(status) status.textContent='Registro sincronizado. La acumulación virtual se calcula por nivel, con intervalos de actividad limitados.';
-    const level=Number(data.level||1); const machine=document.getElementById('gpmMachine');if(machine)machine.textContent='GPU virtual · Nivel '+level;
+    const level=Number(data.level||1);const wc=document.getElementById('welcomeBtn');if(wc){wc.disabled=!!data.welcomeClaimed;wc.textContent=data.welcomeClaimed?'Bono reclamado':'Reclamar bono';}const ws=document.getElementById('welcomeStatus');if(ws)ws.textContent=data.welcomeClaimed?'Bono de bienvenida ya registrado.':'Bono único de 500 GPM disponible.';renderMachines(data);const machine=document.getElementById('gpmMachine');if(machine)machine.textContent='GPU virtual · Nivel '+level;
     const prod=document.getElementById('gpmProduction');if(prod)prod.textContent='Producción: '+Number(data.ratePerMinute||0).toFixed(3)+' GPM/min';
     const cost=document.getElementById('gpmUpgradeCost');if(cost)cost.textContent=data.nextCost===null?'Nivel máximo alcanzado':'Próxima mejora: '+Number(data.nextCost).toFixed(3)+' GPM';
     const buy=document.getElementById('gpmBuy');if(buy){buy.disabled=data.nextCost===null;buy.textContent=data.nextCost===null?'Nivel máximo':'Mejorar';}
@@ -73,7 +73,7 @@ async function buyGPMUpgrade(){
   const button=document.getElementById('gpmBuy'), status=document.getElementById('gpmShopStatus');
   if(button)button.disabled=true;
   try{
-    const response=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'buy'})});
+    const response=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'buy_upgrade'})});
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error==='insufficient_gpm'?'No tienes suficientes GPM para esta mejora.':data.error==='max_level'?'Ya alcanzaste el nivel máximo.':'No se pudo completar la compra.');
     if(status)status.textContent='Mejora comprada y registrada en el servidor.';
@@ -82,6 +82,11 @@ async function buyGPMUpgrade(){
   finally{if(button)button.disabled=false;}
 }
 
+
+
+async function claimWelcome(){try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'welcome'})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='welcome_already_claimed'?'El bono ya fue reclamado.':'No se pudo reclamar el bono.');const el=document.getElementById('welcomeStatus');if(el)el.textContent='Bono de bienvenida registrado en tu cuenta.';await refreshGPM();}catch(e){const el=document.getElementById('welcomeStatus');if(el)el.textContent=e.message;}}
+function renderMachines(data){const el=document.getElementById('machineCatalog');if(!el||!data.catalog)return;const owned={};(data.machines||[]).forEach(x=>owned[x.machine_id]=Number(x.quantity));el.innerHTML=data.catalog.map(m=>'<div class="gpu"><div class="gpu-visual">▣</div><h3>'+m.name+'</h3><div class="meta">Producción de referencia: '+Number(m.rateGpmMinute).toFixed(3)+' GPM/min · Compradas: '+(owned[m.id]||0)+'</div><div class="price">'+Number(m.costGpm).toFixed(3)+' GPM</div><button class="btn secondary full" onclick="buyMachine(\''+m.id+'\')">Comprar</button></div>').join('');}
+async function buyMachine(machine){const st=document.getElementById('gpmShopStatus');try{const r=await fetch('/api/gpm',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({action:'buy_machine',machine})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error==='insufficient_gpm'?'Saldo GPM insuficiente.':'No se pudo comprar la máquina.');if(st)st.textContent='Máquina comprada y registrada.';await refreshGPM();}catch(e){if(st)st.textContent=e.message;}}
 
 async function refreshStore(){
  const status=document.getElementById('storeStatus'),list=document.getElementById('storeOrders');
@@ -187,6 +192,6 @@ async function initialize() {
 }
 window.show = show;
 window.adPlaceholder = adPlaceholder;
-window.buyGPMUpgrade = buyGPMUpgrade;
+window.buyGPMUpgrade = buyGPMUpgrade;window.claimWelcome=claimWelcome;window.buyMachine=buyMachine;
 window.storeOrder = storeOrder;
 initialize();

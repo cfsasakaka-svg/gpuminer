@@ -32,3 +32,16 @@ The postback accepts only server-confirmed `valued` impressions. A unique ymid p
 6. Set `ADMIN_TELEGRAM_ID` to the owner's numeric Telegram user ID to enable the private admin summary.
 
 No withdrawals are enabled by this foundation. A payment provider, withdrawal review rules, and compliance checks must be configured before real payouts can be offered.
+
+## Binance Pay integration readiness (not yet active)
+
+Binance Pay order creation requires an approved Binance Pay Merchant account and server-side API identity/secret keys from its Merchant Admin Portal. Do not put these keys in `index.html`, `app.js`, or Telegram Mini App client code. Store them as Cloudflare Pages secrets only after merchant approval and implementation/testing.
+
+Proposed flow:
+1. The authenticated `/api/store` order endpoint creates a pending internal order with a unique merchant trade number.
+2. Server creates a Binance Pay v3 order (`POST https://bpay.binanceapi.com/binancepay/openapi/v3/order`) with USDT currency, the selected SKU amount, a stable merchant trade number, and the server webhook URL.
+3. The app opens only the returned verified checkout URL; client return/redirect is not proof of payment.
+4. Webhook validates Binance Pay signature (timestamp, nonce, exact body, RSA SHA-256 against the official merchant certificate), maps the merchant trade number to the pending order, checks status, currency, exact amount, and uniqueness, then atomically marks it paid and credits the GPM ledger once.
+5. Duplicate/replayed notifications are idempotent. Amount mismatches and closed orders do not credit GPM. Maintain a reconciliation/query-order path for missing webhooks.
+
+The app remains in payment-disabled mode until merchant approval, keys, webhook verification, reconciliation, and tests are completed. Do not accept screenshots, client redirects, or manual client-side claims as payment proof.

@@ -213,12 +213,10 @@ async function adPlaceholder() {
     const session = await sessionResponse.json().catch(() => ({}));
     if (!sessionResponse.ok || !session.ymid) throw new Error(session.error === 'unauthorized' ? 'La sesión de Telegram no fue validada.' : 'No se pudo crear la sesión de anuncio.');
     setNotice('Anuncio iniciado. Esperando la confirmación de Monetag…');
-    const result = await window.monetagShow({ type: 'end', ymid: session.ymid, requestVar: 'daily_mission' });
-    if (!result || result.reward_event_type !== 'valued') {
-      setNotice('Monetag no confirmó una impresión recompensada. No se añadió saldo ni XP.');
-      return;
-    }
-    setNotice('Monetag confirmó el evento. Verificando el abono en el servidor…');
+    // Monetag Rewarded Popup integration: invoke the SDK zone with the 'pop' format.
+    // The SDK promise is only the client flow; server postback remains authoritative for credit.
+    await window.monetagShow('pop');
+    setNotice('Popup finalizado. Verificando el abono mediante el postback del servidor…');
     const before = Number(account?.balance || 0);
     const rewardsBefore = Number(account?.rewards || 0);
     let confirmed = false;

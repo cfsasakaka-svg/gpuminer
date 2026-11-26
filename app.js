@@ -235,15 +235,31 @@ async function adPlaceholder() {
     }
     const session = await sessionResponse.json().catch(() => ({}));
     if (!sessionResponse.ok || !session.ymid) throw new Error(session.error === 'unauthorized' ? 'La sesión de Telegram no fue validada.' : 'No se pudo crear la sesión de anuncio.');
+    // Preload this exact rewarded-interstitial session first, then show it with
+    // the same ymid/requestVar. If preload fails or stalls, fall back to show().
+    const adParams = { ymid: session.ymid, requestVar: 'daily_mission' };
+    let preloadReady = false;
+    setNotice('Preparando el anuncio recompensado…');
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => window.monetagShow({ ...adParams, type: 'preload' })),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('La precarga tardó demasiado.')), 20000))
+      ]);
+      preloadReady = true;
+    } catch (preloadError) {
+      // Monetag documents direct show as the fallback when preload is unavailable.
+      console.warn('Monetag preload failed; trying direct show.', preloadError);
+    }
+
     // SDK callback and server postback are independent. Keep the SDK outcome for
     // diagnostics, but the server ledger remains the only source of credited rewards.
-    setNotice('Anuncio iniciado. Esperando la respuesta de Monetag…');
+    setNotice(preloadReady ? 'Anuncio preparado. Abriendo el intersticial…' : 'Precarga no disponible. Intentando abrir el anuncio directamente…');
     const sdkOutcome = await Promise.race([
       Promise.resolve()
-        .then(() => window.monetagShow({ type: 'end', ymid: session.ymid, requestVar: 'daily_mission' }))
+        .then(() => window.monetagShow(adParams))
         .then(result => ({ kind: 'resolved', result }))
         .catch(error => ({ kind: 'rejected', error })),
-      new Promise(resolve => setTimeout(() => resolve({ kind: 'pending' }), 15000))
+      new Promise(resolve => setTimeout(() => resolve({ kind: 'pending' }), 30000))
     ]);
     if (sdkOutcome.kind === 'pending') {
       setNotice('El anuncio se abrió. La respuesta de Monetag está tardando; verificando el abono directamente con el servidor…');
@@ -280,9 +296,11 @@ async function adPlaceholder() {
       }
     }
 
-    if (confirmed) {
-      setNotice('Recompensa registrada en tu cuenta mediante el postback verificado del servidor.');
-      notifyUser('¡Recompensa acreditada!', 'El servidor confirmó el abono de tu recompensa.', 'success');
+    if (confirmed && sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'valued') {
+      setNotice('Recompensa registrada: Monetag confirmó la impresión monetizada y el servidor verificó el abono.');
+      notifyUser('¡Recompensa acreditada!', 'Monetag y el servidor confirmaron tu recompensa.', 'success');
+    } else if (confirmed) {
+      setNotice('El servidor registró un movimiento, pero Monetag no confirmó una impresión recompensada válida en esta sesión. Revisa el saldo actualizado; no se muestra como recompensa de anuncio.');
     } else if (sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'non_valued') {
       setNotice('Monetag confirmó que esta impresión no fue monetizada. Por eso no se generó recompensa.');
       showToast('Esta impresión no generó ingresos.', 'pending');

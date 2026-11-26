@@ -24,7 +24,7 @@ export async function verifyTelegramInitData(initData, botToken) {
   try {
     const u = JSON.parse(params.get("user") || "null");
     if (!u || !Number.isSafeInteger(Number(u.id))) return null;
-    return { id: String(u.id), username: typeof u.username === "string" ? u.username.slice(0, 64) : null, firstName: typeof u.first_name === "string" ? u.first_name.slice(0, 128) : null };
+    return { id: String(u.id), username: typeof u.username === "string" ? u.username.slice(0, 64) : null, firstName: typeof u.first_name === "string" ? u.first_name.slice(0, 128) : null, startParam: typeof params.get("start_param") === "string" ? params.get("start_param").slice(0, 64) : null };
   } catch { return null; }
 }
 export async function requireTelegram(request, env) {

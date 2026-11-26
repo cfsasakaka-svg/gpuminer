@@ -239,6 +239,75 @@ async function adPlaceholder() {
     if (button) { button.disabled = false; button.textContent = 'Ver anuncio'; }
   }
 }
+
+async function refreshPartners() {
+  const status = document.getElementById('partnerStatus');
+  try {
+    if (!tg?.initData) throw new Error('Abre GPU MINER desde Telegram para generar tu enlace personal.');
+    const response = await fetch('/api/partners', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.inviteLink) throw new Error(data.error === 'unauthorized' ? 'Telegram no pudo validar tu sesión. Vuelve a abrir la Mini App.' : 'No se pudo cargar tu enlace de invitación.');
+    const link = document.getElementById('partnerInviteLink');
+    const count = document.getElementById('partnerReferralCount');
+    if (link) link.value = data.inviteLink;
+    if (count) count.textContent = Number(data.referrals || 0).toLocaleString('es-VE');
+    if (status) status.textContent = 'Invitaciones conectadas. Los amigos se registran cuando abren GPU MINER por primera vez desde tu enlace.';
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function copyInviteLink() {
+  const link = document.getElementById('partnerInviteLink');
+  if (!link?.value || !link.value.startsWith('https://t.me/')) {
+    notifyUser('Enlace no disponible', 'Espera a que cargue tu enlace personal.', 'error');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(link.value);
+    notifyUser('Enlace copiado', 'Tu enlace personal de GPU MINER está listo para compartir.', 'success');
+  } catch {
+    link.focus();
+    link.select();
+    const copied = document.execCommand('copy');
+    if (copied) notifyUser('Enlace copiado', 'Tu enlace personal de GPU MINER está listo para compartir.', 'success');
+    else notifyUser('Copia manual', 'Mantén pulsado el enlace para copiarlo.', 'info');
+  }
+}
+
+async function shareInviteLink() {
+  const link = document.getElementById('partnerInviteLink');
+  if (!link?.value || !link.value.startsWith('https://t.me/')) {
+    notifyUser('Enlace no disponible', 'Espera a que cargue tu enlace personal.', 'error');
+    return;
+  }
+  const shareData = {
+    title: 'GPU MINER',
+    text: 'Únete a GPU MINER. Abre tu granja virtual en Telegram y participa en las misiones para acumular GPM.',
+    url: link.value
+  };
+  try {
+    if (navigator.share) {
+      await navigator.share(shareData);
+      showToast('Enlace de GPU MINER compartido.');
+      return;
+    }
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink('https://t.me/share/url?url=' + encodeURIComponent(link.value) + '&text=' + encodeURIComponent(shareData.text));
+      return;
+    }
+    await copyInviteLink();
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    try { await copyInviteLink(); }
+    catch { notifyUser('No se pudo compartir', 'Copia el enlace personal y pégalo en la publicación.', 'error'); }
+  }
+}
+
 async function initialize() {
   if (!tg?.initData) {
     const nameEl = document.getElementById('tgName');
@@ -248,6 +317,7 @@ async function initialize() {
   }
   try { await loadMonetag(); setNotice('Monetag conectado. Las recompensas requieren confirmación del servidor.'); }
   catch (error) { setNotice(error.message); }
+  await refreshPartners();
   try { await refreshAccount(); }
   catch (error) {
     const nameEl = document.getElementById('tgName');
@@ -263,6 +333,8 @@ window.show = show;
 window.adPlaceholder = adPlaceholder;
 window.buyGPMUpgrade = buyGPMUpgrade;window.claimWelcome=claimWelcome;window.buyMachine=buyMachine;window.upgradeMachine=upgradeMachine;
 window.storeOrder = storeOrder;
+window.shareInviteLink = shareInviteLink;
+window.copyInviteLink = copyInviteLink;
 window.addEventListener('error', event => { console.error('GPU Miner runtime error:', event.error || event.message); setNotice('Se produjo un error interno. Cierra y vuelve a abrir GPU Miner desde Telegram.'); });
 window.addEventListener('unhandledrejection', event => { console.error('GPU Miner async error:', event.reason); setNotice('Falló una operación. Comprueba tu conexión e inténtalo de nuevo.'); });
 initialize();

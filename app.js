@@ -250,7 +250,17 @@ async function adPlaceholder() {
     let confirmed = false;
     for (let i = 0; i < 8; i++) {
       await new Promise(resolve => setTimeout(resolve, 1500));
-      const fresh = await refreshAccount();
+      let fresh;
+      try {
+        fresh = await Promise.race([
+          refreshAccount(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Consulta de saldo agotó el tiempo límite.')), 5000))
+        ]);
+      } catch (verificationError) {
+        // Keep the UI responsive if account verification is slow; server postback remains authoritative.
+        if (i === 7) setNotice('El anuncio terminó, pero no pudimos verificar el abono a tiempo. Consulta tu saldo más tarde.');
+        continue;
+      }
       if (Number(fresh.balance || 0) > before || Number(fresh.rewards || 0) > rewardsBefore) { confirmed = true; break; }
     }
     setNotice(confirmed

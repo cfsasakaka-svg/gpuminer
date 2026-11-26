@@ -2,7 +2,7 @@ import { json, requireTelegram } from "../_lib/auth.js";
 const MAX_CREDIT_SECONDS=300;
 const RATES=[0,200,350,550,850,1200,1600,2100,2700,3400,4200];
 const COSTS=[0,25000,100000,350000,1000000,2500000,5000000,10000000,20000000,40000000];
-const MACHINES=[{id:'starter',name:'GPU Starter',cost:500000,rate:50,description:'Minadora de entrada · estable'},{id:'miner',name:'GPU Miner',cost:2500000,rate:180,description:'Rendimiento intermedio'},{id:'pro',name:'GPU Pro',cost:10000000,rate:650,description:'Alta capacidad de producción'},{id:'elite',name:'GPU Elite',cost:35000000,rate:1800,description:'Máxima potencia del catálogo'}];const MAX_UPGRADE=5;function upgradeCost(m,level){return Math.round(m.cost*(.12+.08*level));}function boosted(m,level){return Math.floor(m.rate*(1+Number(level||0)*.25));}
+const MACHINES=[{id:'starter',name:'GPU Starter',cost:500000,rate:200,description:'Minadora de entrada · estable'},{id:'miner',name:'GPU Miner',cost:2500000,rate:600,description:'Rendimiento intermedio'},{id:'pro',name:'GPU Pro',cost:10000000,rate:2000,description:'Alta capacidad de producción'},{id:'elite',name:'GPU Elite',cost:35000000,rate:5000,description:'Máxima potencia del catálogo'}];const MAX_UPGRADE=5;function upgradeCost(m,level){return Math.round(m.cost*(.12+.08*level));}function boosted(m,level){return Math.floor(m.rate*(1+Number(level||0)*.25));}
 function rate(level){return RATES[Math.min(Math.max(1,Number(level)||1),RATES.length-1)]||200;}
 async function accrue(env,id,now){
  await env.DB.prepare("INSERT INTO gpm_state (telegram_id,balance_milli,last_tick_at,updated_at) VALUES (?,0,?,datetime('now')) ON CONFLICT(telegram_id) DO NOTHING").bind(id,now).run();

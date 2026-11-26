@@ -251,7 +251,7 @@ async function adPlaceholder() {
   if(button){button.disabled=true;button.textContent='Abriendo…';}
   // Critical: invoke Monetag synchronously in the tap handler, before any await/fetch.
   let showPromise;
-  try{showPromise=Promise.resolve(window.monetagShow({...prepared.params,type:'end'}));}
+  try{showPromise=Promise.resolve(window.monetagShow({...prepared.params,type:'pop'}));}
   catch(error){showPromise=Promise.reject(error);}
   try{
     setNotice('Solicitud enviada a Monetag. Esperando el anuncio…');

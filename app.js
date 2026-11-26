@@ -82,6 +82,17 @@ async function buyGPMUpgrade(){
   finally{if(button)button.disabled=false;}
 }
 
+
+async function storeOrder(sku){
+ const status=document.getElementById('storeStatus');
+ try{
+  const response=await fetch('/api/store',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({sku})});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error('No se pudo registrar el pedido.');
+  if(status)status.textContent='Pedido '+data.orderId+' creado como pendiente. No se acreditó GPM: pagos todavía no habilitados.';
+ }catch(e){if(status)status.textContent=e.message;}
+}
+
 async function loadMonetag() {
   const response = await fetch('/api/config', { cache: 'no-store' });
   const config = await response.json();
@@ -163,4 +174,5 @@ async function initialize() {
 window.show = show;
 window.adPlaceholder = adPlaceholder;
 window.buyGPMUpgrade = buyGPMUpgrade;
+window.storeOrder = storeOrder;
 initialize();

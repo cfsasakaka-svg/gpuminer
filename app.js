@@ -215,7 +215,7 @@ async function adPlaceholder() {
     setNotice('Anuncio iniciado. Esperando la confirmación de Monetag…');
     // Monetag Rewarded Popup integration: invoke the SDK zone with the 'pop' format.
     // The SDK promise is only the client flow; server postback remains authoritative for credit.
-    await window.monetagShow('pop');
+    await window.monetagShow();
     setNotice('Popup finalizado. Verificando el abono mediante el postback del servidor…');
     const before = Number(account?.balance || 0);
     const rewardsBefore = Number(account?.rewards || 0);

@@ -4,6 +4,7 @@ try { tg?.ready(); tg?.expand(); } catch {}
 let sdkReady = false;
 let account = null;
 let busy = false;
+let gpmBusy = false;
 
 function show(id, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === id));
@@ -45,6 +46,23 @@ async function refreshAccount() {
   updateAccount(data);
   return data;
 }
+
+async function refreshGPM() {
+  if (!tg?.initData || gpmBusy) return;
+  gpmBusy = true;
+  try {
+    const response = await fetch('/api/gpm', { method:'POST', headers: authHeaders(), cache:'no-store' });
+    const data = await response.json().catch(()=>({}));
+    if (!response.ok) throw new Error('No se pudo consultar GPM.');
+    const balance = Number(data.gpm || 0).toFixed(3);
+    const el=document.getElementById('gpmBalance'); if(el) el.textContent=balance+' GPM';
+    const profile=document.getElementById('profGPM'); if(profile) profile.textContent=balance;
+    const status=document.getElementById('gpmStatus');
+    if(status) status.textContent='Registro sincronizado. '+Number(data.ratePerMinute||0).toFixed(3)+' GPM por minuto de actividad, con límite de acreditación por intervalo.';
+  } catch(error) { const status=document.getElementById('gpmStatus'); if(status) status.textContent=error.message; }
+  finally { gpmBusy=false; }
+}
+
 async function loadMonetag() {
   const response = await fetch('/api/config', { cache: 'no-store' });
   const config = await response.json();
@@ -120,6 +138,8 @@ async function initialize() {
     if (nameEl) nameEl.textContent = 'Abre desde Telegram';
     setNotice(error.message);
   }
+  await refreshGPM();
+  setInterval(refreshGPM, 60000);
 }
 window.show = show;
 window.adPlaceholder = adPlaceholder;

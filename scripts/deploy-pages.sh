@@ -8,10 +8,24 @@ set -euo pipefail
 wrangler pages project create gpuminer --production-branch main >/dev/null 2>&1 || true
 
 api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database"
-db_id=$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$api" | jq -r '.result[]? | select(.name=="gpuminer-db") | .uuid' | head -n1)
+cf_db_list() {
+  local response code body
+  response=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$api")
+  code="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [ "$code" != "200" ]; then
+    echo "Cloudflare D1 API returned HTTP $code:" >&2
+    printf '%s\n' "$body" >&2
+    return 1
+  fi
+  printf '%s' "$body"
+}
+db_json=$(cf_db_list)
+db_id=$(printf '%s' "$db_json" | jq -r '.result[]? | select(.name=="gpuminer-db") | .uuid' | head -n1)
 if [ -z "$db_id" ]; then
   wrangler d1 create gpuminer-db
-  db_id=$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "$api" | jq -r '.result[]? | select(.name=="gpuminer-db") | .uuid' | head -n1)
+  db_json=$(cf_db_list)
+  db_id=$(printf '%s' "$db_json" | jq -r '.result[]? | select(.name=="gpuminer-db") | .uuid' | head -n1)
 fi
 if [ -z "$db_id" ] || [ "$db_id" = "null" ]; then
   echo "Could not resolve the D1 database ID." >&2

@@ -283,19 +283,38 @@ async function adPlaceholder() {
       showPromise.then(result => ({ kind: 'resolved', result })).catch(error => ({ kind: 'rejected', error })),
       new Promise(resolve => setTimeout(() => resolve({ kind: 'pending' }), 30000))
     ]);
+    const sdkResult = sdkOutcome.kind === 'resolved' ? sdkOutcome.result : null;
+    const sdkSessionMatches = Boolean(
+      sdkResult && sdkResult.event_type === 'impression' &&
+      String(sdkResult.variable2 || '') === String(prepared.params.ymid)
+    );
     if (sdkOutcome.kind === 'pending') {
-      setNotice('La respuesta de Monetag está tardando; verificando el abono directamente con el servidor…');
+      if (button) button.textContent = 'Verificando…';
+      setNotice('Monetag está tardando. La app está consultando el servidor para comprobar si llegó el abono…');
     } else if (sdkOutcome.kind === 'rejected') {
+      if (button) button.textContent = 'Verificando…';
       console.warn('Monetag show rejected:', sdkOutcome.error);
-      setNotice('Monetag no confirmó la apertura. Comprobando si llegó el registro seguro…');
-    } else if (sdkOutcome.result?.reward_event_type === 'non_valued') {
+      setNotice('Monetag no confirmó la apertura. Comprobando el registro seguro en el servidor…');
+    } else if (!sdkSessionMatches) {
+      if (button) button.textContent = 'Verificando…';
+      console.warn('Monetag callback does not match this impression:', {
+        event_type: sdkResult?.event_type || null,
+        hasMatchingSession: String(sdkResult?.variable2 || '') === String(prepared.params.ymid),
+        reward_event_type: sdkResult?.reward_event_type || null
+      });
+      setNotice('Respuesta recibida, pero falta validar que pertenece a este anuncio. Comprobando el servidor…');
+    } else if (sdkResult?.reward_event_type === 'non_valued') {
+      if (button) button.textContent = 'Verificando…';
       setNotice('Monetag informó que esta impresión no fue monetizada. Verificando el registro del servidor…');
     } else {
-      setNotice('Respuesta de Monetag recibida. Verificando el abono mediante el postback del servidor…');
+      if (button) button.textContent = 'Verificando abono…';
+      setNotice('Monetag respondió para este anuncio. Verificando el abono mediante el servidor…');
     }
 
     let confirmed = false;
     for (let i = 0; i < 15; i++) {
+      if (button) button.textContent = `Verificando ${i + 1}/15…`;
+      if (i > 0) setNotice(`Comprobando el abono en el servidor (${i + 1}/15)…`);
       await new Promise(resolve => setTimeout(resolve, 3000));
       let fresh;
       let verifyTimer;
@@ -312,20 +331,20 @@ async function adPlaceholder() {
       }
     }
 
-    if (confirmed && sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'valued') {
-      setNotice('Recompensa registrada: Monetag confirmó la impresión monetizada y el servidor verificó el abono.');
+    if (confirmed && sdkSessionMatches && sdkResult?.reward_event_type === 'valued') {
+      setNotice('Recompensa registrada: Monetag confirmó esta impresión monetizada y el servidor verificó el abono.');
       notifyUser('¡Recompensa acreditada!', 'Monetag y el servidor confirmaron tu recompensa.', 'success');
     } else if (confirmed) {
       setNotice('El servidor registró un movimiento, pero Monetag no confirmó una impresión recompensada válida en esta sesión. Revisa el saldo actualizado.');
-    } else if (sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'non_valued') {
+    } else if (sdkSessionMatches && sdkResult?.reward_event_type === 'non_valued') {
       setNotice('Monetag confirmó que esta impresión no fue monetizada. Por eso no se generó recompensa.');
       showToast('Esta impresión no generó ingresos.', 'pending');
-    } else if (sdkOutcome.kind === 'resolved' && sdkOutcome.result?.reward_event_type === 'valued') {
+    } else if (sdkSessionMatches && sdkResult?.reward_event_type === 'valued') {
       setNotice('Monetag confirmó una impresión monetizada, pero el postback aún no aparece en tu saldo. No se acreditó nada localmente.');
       showToast('Impresión monetizada; abono pendiente de sincronización.', 'pending');
     } else {
-      setNotice('No llegó una confirmación verificable al servidor. No se acreditó saldo localmente. Puedes consultar tu saldo más tarde.');
-      showToast('No llegó confirmación del servidor.', 'pending');
+      setNotice('No se pudo validar una recompensa para este anuncio. El servidor no confirmó un abono nuevo; no se acreditó saldo localmente.');
+      showToast('No se pudo verificar la recompensa.', 'pending');
     }
   } catch (error) {
     console.error('Error en anuncio recompensado:', error);

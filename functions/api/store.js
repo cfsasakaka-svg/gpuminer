@@ -11,7 +11,8 @@ const catalog=[
 ];
 export async function onRequestGet({request,env}){
  const user=await requireTelegram(request,env);if(!user)return json({error:"unauthorized"},401);
- return json({catalog:catalog.map(x=>({...x,priceUSD:x.usd/100,gpmAmount:x.gpm/1000})),paymentsEnabled:false});
+ const orders=await env.DB.prepare("SELECT id,sku,amount_usd_cents,gpm_milli,status,created_at,paid_at FROM gpm_orders WHERE telegram_id=? ORDER BY created_at DESC LIMIT 30").bind(user.id).all();
+ return json({catalog:catalog.map(x=>({...x,priceUSD:x.usd/100,gpmAmount:x.gpm/1000})),orders:orders.results||[],paymentsEnabled:false});
 }
 export async function onRequestPost({request,env}){
  if(!env.DB)return json({error:"service_unavailable"},503);

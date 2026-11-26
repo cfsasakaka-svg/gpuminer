@@ -83,13 +83,26 @@ async function buyGPMUpgrade(){
 }
 
 
+async function refreshStore(){
+ const status=document.getElementById('storeStatus'),list=document.getElementById('storeOrders');
+ if(!tg?.initData)return;
+ try{
+  const response=await fetch('/api/store',{headers:authHeaders(),cache:'no-store'}),data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error('No se pudo consultar la tienda.');
+  if(list){
+   if(!data.orders?.length)list.innerHTML='<div class="empty">Todavía no tienes pedidos.</div>';
+   else list.innerHTML=data.orders.map(o=>{const sku=String(o.sku||'').replace(/</g,'&lt;');const st=String(o.status||'pending').replace(/</g,'&lt;');return '<div class="listrow"><strong>'+sku+'</strong><span style="float:right">'+(Number(o.amount_usd_cents)/100).toFixed(2)+' USD · '+(Number(o.gpm_milli)/1000).toFixed(3)+' GPM</span><div class="small muted">'+st+' · '+String(o.created_at||'')+'</div></div>';}).join('');
+  }
+ }catch(e){if(status)status.textContent=e.message;}
+}
 async function storeOrder(sku){
  const status=document.getElementById('storeStatus');
  try{
   const response=await fetch('/api/store',{method:'POST',headers:{...authHeaders(),'content-type':'application/json'},body:JSON.stringify({sku})});
   const data=await response.json().catch(()=>({}));
   if(!response.ok)throw new Error('No se pudo registrar el pedido.');
-  if(status)status.textContent='Pedido '+data.orderId+' creado como pendiente. No se acreditó GPM: pagos todavía no habilitados.';
+  if(status)status.textContent='Pedido '+data.orderId+' registrado como pendiente. No se acreditó GPM; falta habilitar y confirmar el pago.';
+  await refreshStore();
  }catch(e){if(status)status.textContent=e.message;}
 }
 
@@ -169,6 +182,7 @@ async function initialize() {
     setNotice(error.message);
   }
   await refreshGPM();
+  await refreshStore();
   setInterval(refreshGPM, 60000);
 }
 window.show = show;

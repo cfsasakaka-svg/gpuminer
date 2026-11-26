@@ -230,13 +230,13 @@ async function adPlaceholder() {
     const session = await sessionResponse.json().catch(() => ({}));
     if (!sessionResponse.ok || !session.ymid) throw new Error(session.error === 'unauthorized' ? 'La sesión de Telegram no fue validada.' : 'No se pudo crear la sesión de anuncio.');
     setNotice('Anuncio iniciado. Esperando la confirmación de Monetag…');
-    // Rewarded interstitial: guard against SDK promises that never settle.
-    // This timeout only releases the UI; server postback remains authoritative for credit.
+    // Rewarded interstitial: pass the server-created ymid and placement so Monetag can
+    // correlate its confirmation/postback with this user session. Keep a UI timeout as a fallback.
     setNotice('Anuncio iniciado. Esperando la respuesta de Monetag…');
     let adTimer;
     try {
       await Promise.race([
-        Promise.resolve().then(() => window.monetagShow()),
+        Promise.resolve().then(() => window.monetagShow({ type: 'end', ymid: session.ymid, requestVar: 'daily_mission' })),
         new Promise((_, reject) => {
           adTimer = setTimeout(() => reject(new Error('Monetag no respondió en 30 segundos. Intenta nuevamente más tarde.')), 30000);
         })

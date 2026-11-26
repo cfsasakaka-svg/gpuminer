@@ -7,6 +7,7 @@ export async function onRequestGet({ request, env }) {
   if (!env.DB || !env.MONETAG_POSTBACK_SECRET) return new Response("Unavailable", { status: 503 });
   const p = new URL(request.url).searchParams;
   if (!sameSecret(p.get("secret") || "", env.MONETAG_POSTBACK_SECRET)) return new Response("Forbidden", { status: 403 });
+  if (!env.MONETAG_SDK_ZONE_ID || (p.get("zone_id") || "") !== env.MONETAG_SDK_ZONE_ID) return new Response("Invalid zone", { status: 403 });
   const ymid = p.get("ymid") || "", eventType = p.get("event_type") || "", rewardType = p.get("reward_event_type") || "";
   const priceText = p.get("estimated_price") || "0", price = Number(priceText);
   if (!/^[0-9a-f-]{36}$/i.test(ymid) || !["impression", "click"].includes(eventType) || !["valued", "non_valued"].includes(rewardType) || !Number.isFinite(price) || price < 0 || price > 1000) return new Response("Bad request", { status: 400 });

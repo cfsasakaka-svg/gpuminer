@@ -10,5 +10,5 @@ export async function onRequestPost({ request, env }) {
   const ymid = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now')) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, updated_at=datetime('now')").bind(user.id, user.username, user.firstName).run();
   let snap=0;if(placement==='double_gpm'){const g=await env.DB.prepare("SELECT balance_milli FROM gpm_state WHERE telegram_id=?").bind(user.id).first();snap=Number(g?.balance_milli||0);if(snap<=0)return json({error:"empty_gpm"},400);}await env.DB.prepare("INSERT INTO ad_sessions (ymid, telegram_id, request_var, created_at, expires_at,gpm_snapshot_milli) VALUES (?, ?, ?, datetime('now'), datetime('now', '+48 hours'),?)").bind(ymid, user.id, placement,snap).run();
-  return json({ ymid, expiresInSeconds: 172800 });
+  return json({ ymid, expiresInSeconds: 172800, gpmSnapshotMilli: snap });
 }

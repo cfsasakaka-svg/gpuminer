@@ -272,7 +272,7 @@ async function adPlaceholder() {
   // No fetch, balance refresh, or other await may run before this call.
   let showPromise;
   try {
-    showPromise = Promise.resolve(window.monetagShow(prepared.params));
+    showPromise = Promise.resolve(window.monetagShow({ ...prepared.params, type: 'end' }));
   } catch (error) {
     showPromise = Promise.reject(error);
   }

@@ -285,7 +285,7 @@ async function adPlaceholder() {
     }
 
     const result = outcome.result;
-    if (result?.reward_event_type !== 'valued' || result?.event_type !== 'impression') {
+    if (result?.reward_event_type !== 'valued' || !['impression', 'click'].includes(result?.event_type)) {
       setNotice(result?.reward_event_type === 'non_valued'
         ? 'Monetag abrió/procesó el POP, pero esta impresión no fue monetizada. No se generó recompensa.'
         : 'Monetag no devolvió una confirmación monetizada válida. No se acreditó recompensa.');

@@ -19,7 +19,9 @@ export async function onRequestGet({ request, env }) {
   const shareEligible = session.request_var === 'daily_mission';
   const ownerOnlyEligible = !shareEligible;
   const userShare = Math.floor(micros * 0.30), ownerShare = micros - userShare;
-  const eligible = eventType === 'impression' && rewardType === 'valued' && micros > 0;
+  // Rewarded Popup can report a valued impression or a valued click from its linked zone.
+  // Monetag instructs publishers to grant once per ymid for any valued event type.
+  const eligible = rewardType === 'valued' && micros > 0;
   await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO ad_postbacks (ymid, event_type, reward_event_type, estimated_price, zone_id, sub_zone_id, received_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))").bind(ymid, eventType, rewardType, priceText, p.get("zone_id"), p.get("sub_zone_id")),
     env.DB.prepare("INSERT OR IGNORE INTO monetized_events (ymid, telegram_id, estimated_usd_micros, user_share_usd_micros, owner_share_usd_micros, created_at) SELECT ?, ?, ?, ?, ?, datetime('now') WHERE ?=1").bind(ymid, session.telegram_id, micros, userShare, ownerShare, eligible && shareEligible ? 1 : 0),
